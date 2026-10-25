@@ -1,20 +1,16 @@
 -- =========================================================================
--- ACC MASTER SUITE: ZERO-TOUCH CONFIG, SPY DUMPER, KEY GEN & QYRIX LOADER
+-- ACC MASTER SUITE: NETWORK INTERCEPT GRADER (CASH ONLY)
 -- =========================================================================
 
--- 0. Key.txt Auto-Generator
 pcall(function()
     local keyName = "Key.txt"
     local keyValue = "qyrix-ghasldhjgsa"
-    if writefile and isfile then
-        if not isfile(keyName) then
-            writefile(keyName, keyValue)
-        end
+    if writefile and isfile and not isfile(keyName) then
+        writefile(keyName, keyValue)
     end
 end)
 
 local SCRIPT_URL = "" 
-
 if not game:IsLoaded() then game.Loaded:Wait() end
 
 local Players = game:GetService("Players")
@@ -40,71 +36,47 @@ pcall(function()
     local qTeleport = queue_on_teleport or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport)
     if qTeleport and SCRIPT_URL ~= "" then
         LP.OnTeleport:Connect(function(state)
-            if state == Enum.TeleportState.Started then
-                qTeleport('loadstring(game:HttpGet("' .. SCRIPT_URL .. '"))()')
-            end
+            if state == Enum.TeleportState.Started then qTeleport('loadstring(game:HttpGet("' .. SCRIPT_URL .. '"))()') end
         end)
     end
 end)
 
--- ==========================================
 -- EXTERNAL HUBS (INFINITE YIELD & QYRIX)
--- ==========================================
 task.spawn(function() pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))() end) end)
-
 task.spawn(function()
     pcall(function()
         local Data = { Owner = "Mana", Library = "Neverlose-UI" }
         local BaseURL = ("https://raw.githubusercontent.com/%s-scripts/%s/refs/heads/main/Games/"):format(Data.Owner, Data.Library)
         local function EncodeSpaces(str) return BaseURL .. str:gsub(" ", "%%20") end
         local Games = {
-            [18172550962] = EncodeSpaces("Pixel Blade.lua"),
-            [18172553902] = EncodeSpaces("Pixel Blade.lua"),
-            [133884972346775] = EncodeSpaces("Pixel Blade.lua"),
-            [130247632398296] = EncodeSpaces("Anime Fighting Simulator.lua"),
-            [76285745979410] = EncodeSpaces("Anime Card Collection.lua"),
-            [75992362647444] = EncodeSpaces("Tap Simulator.lua"),
-            [111187356770616] = EncodeSpaces("Tap Simulator.lua"), 
-            [74260430392611] = EncodeSpaces("Rebirth Champions Ultimate.lua"),
-            [2753915549] = EncodeSpaces("Blox Fruits.lua"),
-            [4442272183] = EncodeSpaces("Blox Fruits.lua"),
-            [7449423635] = EncodeSpaces("Blox Fruits.lua"),
-            [70768610276749] = EncodeSpaces("Anime Final Quest.lua"),
-            [73019180051115] = EncodeSpaces("Anime Final Quest.lua"),
-            [73912821025828] = EncodeSpaces("Anime Final Quest.lua"),
-            [77367808280910] = EncodeSpaces("Anime Final Quest.lua"),
-            [81100481912247] = EncodeSpaces("Anime Final Quest.lua"),
-            [92577188734435] = EncodeSpaces("Anime Final Quest.lua"),
-            [95240177479580] = EncodeSpaces("Anime Final Quest.lua"),
-            [95996380540192] = EncodeSpaces("Anime Final Quest.lua"),
-            [100744519298647] = EncodeSpaces("Anime Final Quest.lua"),
-            [112175864208911] = EncodeSpaces("Anime Final Quest.lua"),
-            [113644871968832] = EncodeSpaces("Anime Final Quest.lua"),
-            [113963744934619] = EncodeSpaces("Anime Final Quest.lua"),
-            [120826799896677] = EncodeSpaces("Anime Final Quest.lua"),
-            [126889338150949] = EncodeSpaces("Anime Final Quest.lua"),
-            [127316980657672] = EncodeSpaces("Anime Final Quest.lua"),
-            [129369781546936] = EncodeSpaces("Anime Final Quest.lua"),
-            [130426042808804] = EncodeSpaces("Anime Final Quest.lua"),
-            [132561514935233] = EncodeSpaces("Anime Final Quest.lua"),
-            [136683944064056] = EncodeSpaces("Anime Final Quest.lua"),
-            [89469502395769] = EncodeSpaces("Kick A Lucky Block.lua"),
+            [18172550962] = EncodeSpaces("Pixel Blade.lua"), [18172553902] = EncodeSpaces("Pixel Blade.lua"), [133884972346775] = EncodeSpaces("Pixel Blade.lua"),
+            [130247632398296] = EncodeSpaces("Anime Fighting Simulator.lua"), [76285745979410] = EncodeSpaces("Anime Card Collection.lua"),
+            [75992362647444] = EncodeSpaces("Tap Simulator.lua"), [111187356770616] = EncodeSpaces("Tap Simulator.lua"), 
+            [74260430392611] = EncodeSpaces("Rebirth Champions Ultimate.lua"), [2753915549] = EncodeSpaces("Blox Fruits.lua"),
+            [4442272183] = EncodeSpaces("Blox Fruits.lua"), [7449423635] = EncodeSpaces("Blox Fruits.lua"),
+            [70768610276749] = EncodeSpaces("Anime Final Quest.lua"), [73019180051115] = EncodeSpaces("Anime Final Quest.lua"),
+            [73912821025828] = EncodeSpaces("Anime Final Quest.lua"), [77367808280910] = EncodeSpaces("Anime Final Quest.lua"),
+            [81100481912247] = EncodeSpaces("Anime Final Quest.lua"), [92577188734435] = EncodeSpaces("Anime Final Quest.lua"),
+            [95240177479580] = EncodeSpaces("Anime Final Quest.lua"), [95996380540192] = EncodeSpaces("Anime Final Quest.lua"),
+            [100744519298647] = EncodeSpaces("Anime Final Quest.lua"), [112175864208911] = EncodeSpaces("Anime Final Quest.lua"),
+            [113644871968832] = EncodeSpaces("Anime Final Quest.lua"), [113963744934619] = EncodeSpaces("Anime Final Quest.lua"),
+            [120826799896677] = EncodeSpaces("Anime Final Quest.lua"), [126889338150949] = EncodeSpaces("Anime Final Quest.lua"),
+            [127316980657672] = EncodeSpaces("Anime Final Quest.lua"), [129369781546936] = EncodeSpaces("Anime Final Quest.lua"),
+            [130426042808804] = EncodeSpaces("Anime Final Quest.lua"), [132561514935233] = EncodeSpaces("Anime Final Quest.lua"),
+            [136683944064056] = EncodeSpaces("Anime Final Quest.lua"), [89469502395769] = EncodeSpaces("Kick A Lucky Block.lua"),
             [88933961678687] = EncodeSpaces("Hyper Speed Runner.lua")
         }
-
         local function LoadScript(id)
             local url = Games[id]
             if not url then return end
-            local scriptSource = game:HttpGetAsync(url)
-            loadstring(scriptSource)()
+            loadstring(game:HttpGetAsync(url))()
         end
-
         LoadScript(game.PlaceId)
     end)
 end)
 
 -- ==========================================
--- 1. DATABASE EXTRACTION & IMAGE MAPPING
+-- 1. DATABASE EXTRACTION
 -- ==========================================
 local CardSortedPacks, CardPackCards = {}, {}
 local nameToImage, imageIdToNames = {}, {}
@@ -115,9 +87,7 @@ local function stripTags(str)
     return (string.match(s, "^%s*(.-)%s*$") or s)
 end
 
-local function extractId(str)
-    return string.match(tostring(str), "%d+") or tostring(str)
-end
+local function extractId(str) return string.match(tostring(str), "%d+") or tostring(str) end
 
 pcall(function() 
     local RawImageDB = require(RS.Modules.Config.Core.ImageConfig) 
@@ -129,9 +99,7 @@ pcall(function()
                 nameToImage[cleanName] = extracted
                 if not imageIdToNames[extracted] then imageIdToNames[extracted] = {} end
                 table.insert(imageIdToNames[extracted], cleanName)
-            elseif type(v) == "table" then
-                parseImgs(v)
-            end
+            elseif type(v) == "table" then parseImgs(v) end
         end
     end
     parseImgs(RawImageDB)
@@ -143,13 +111,9 @@ pcall(function()
     for k, v in pairs(RawCardDB) do
         if type(v) == "table" and not v.Price then 
             local firstChild = next(v)
-            if type(v[firstChild]) == "table" and (v[firstChild].Price or v[firstChild].List) then
-                targetPacks = v 
-                break
-            end
+            if type(v[firstChild]) == "table" and (v[firstChild].Price or v[firstChild].List) then targetPacks = v break end
         end
     end
-
     if targetPacks then
         for pName, pData in pairs(targetPacks) do
             if type(pData) == "table" then
@@ -158,9 +122,7 @@ pcall(function()
                 if pData.List then
                     for k, v in pairs(pData.List) do
                         local name = type(v)=="string" and v or (type(v)=="table" and v.Name or (type(k)=="string" and k or ""))
-                        if name ~= "" and type(name) == "string" then 
-                            table.insert(cList, stripTags(name))
-                        end
+                        if name ~= "" and type(name) == "string" then table.insert(cList, stripTags(name)) end
                     end
                 end
                 if #cList > 0 then
@@ -175,7 +137,7 @@ pcall(function()
 end)
 
 -- ==========================================
--- 2. LIVE GRADESELECT IMAGE SCANNER
+-- 2. LIVE UI SCANNER (FALLBACK ONLY)
 -- ==========================================
 local sGds = {"F","D","C","B","A","S","S+","SS","SR","UR"}
 local sRnks = {["F"]=1, ["D"]=2, ["C"]=3, ["B"]=4, ["A"]=5, ["S"]=6, ["S+"]=7, ["SS"]=8, ["SR"]=9, ["UR"]=10}
@@ -198,7 +160,6 @@ local function findGradeInUI(iName)
             end
         end
     end
-
     if gsFrame then
         for _, item in ipairs(gsFrame:GetChildren()) do
             local nameLbl = item:FindFirstChild("NameTag") or item:FindFirstChild("ItemName") or item:FindFirstChild("NameLabel", true)
@@ -309,41 +270,27 @@ end
 -- ==========================================
 local function buildSpy(parent)
     local env = (type(getgenv) == "function" and getgenv()) or _G
-    local listening = false
-    local view = "scan"
-    local scanEntries, liveEntries = {}, {}
-    local selectedBody = ""
+    local listening, view, scanEntries, liveEntries = false, "scan", {}, {}
+    local selectedBody, renderQueued, hookNote = "", false, "hook not installed yet"
     local bound = env.ACC_SpyBound or {}
-    env.ACC_SpyBound = bound
-    local renderQueued = false
-    local hookNote = "hook not installed yet"
-    env.ACC_SpyOn = false
+    env.ACC_SpyBound, env.ACC_SpyOn = bound, false
 
-    local bar = Instance.new("Frame", parent)
-    bar.Size, bar.Position, bar.BackgroundTransparency = U2(1, -12, 0, 28), U2(0, 6, 0, 6), 1
-
-    local filter = Instance.new("TextBox", parent)
-    filter.Size, filter.Position, filter.BackgroundColor3, filter.TextColor3 = U2(1, -12, 0, 26), U2(0, 6, 0, 38), C3(15, 15, 15), C3(255, 255, 255)
+    local bar = Instance.new("Frame", parent) bar.Size, bar.Position, bar.BackgroundTransparency = U2(1, -12, 0, 28), U2(0, 6, 0, 6), 1
+    local filter = Instance.new("TextBox", parent) filter.Size, filter.Position, filter.BackgroundColor3, filter.TextColor3 = U2(1, -12, 0, 26), U2(0, 6, 0, 38), C3(15, 15, 15), C3(255, 255, 255)
     filter.PlaceholderText, filter.Text, filter.Font, filter.TextSize, filter.ClearTextOnFocus, filter.BorderSizePixel = "Filter (remote, module, args...)", "", F_GM, 13, false, 0
 
     local status = Instance.new("TextLabel", parent)
     status.BackgroundTransparency, status.Size, status.Position, status.Font, status.TextSize = 1, U2(1, -165, 0, 16), U2(0, 8, 0, 68), F_GM, 12
     status.TextXAlignment, status.TextColor3, status.Text = Enum.TextXAlignment.Left, C3(180, 180, 180), "Full maps the game. Listen logs calls."
 
-    local copyBtn = Instance.new("TextButton", parent)
-    copyBtn.Size, copyBtn.Position, copyBtn.BackgroundColor3, copyBtn.TextColor3, copyBtn.Text, copyBtn.Font, copyBtn.TextSize, copyBtn.BorderSizePixel = U2(0, 64, 0, 18), U2(1, -70, 0, 66), C3(40, 40, 40), C3(255, 255, 255), "Copy", F_GB, 12, 0
+    local copyBtn = Instance.new("TextButton", parent) copyBtn.Size, copyBtn.Position, copyBtn.BackgroundColor3, copyBtn.TextColor3, copyBtn.Text, copyBtn.Font, copyBtn.TextSize, copyBtn.BorderSizePixel = U2(0, 64, 0, 18), U2(1, -70, 0, 66), C3(40, 40, 40), C3(255, 255, 255), "Copy", F_GB, 12, 0
+    local dumpBtn = Instance.new("TextButton", parent) dumpBtn.Size, dumpBtn.Position, dumpBtn.BackgroundColor3, dumpBtn.TextColor3, dumpBtn.Text, dumpBtn.Font, dumpBtn.TextSize, dumpBtn.BorderSizePixel = U2(0, 80, 0, 18), U2(1, -155, 0, 66), C3(40, 40, 40), C3(255, 255, 255), "Dump File", F_GB, 12, 0
 
-    local dumpBtn = Instance.new("TextButton", parent)
-    dumpBtn.Size, dumpBtn.Position, dumpBtn.BackgroundColor3, dumpBtn.TextColor3, dumpBtn.Text, dumpBtn.Font, dumpBtn.TextSize, dumpBtn.BorderSizePixel = U2(0, 80, 0, 18), U2(1, -155, 0, 66), C3(40, 40, 40), C3(255, 255, 255), "Dump File", F_GB, 12, 0
-
-    local list = Instance.new("ScrollingFrame", parent)
-    list.Size, list.Position, list.BackgroundColor3, list.BorderSizePixel, list.ScrollBarThickness, list.CanvasSize = U2(1, -12, 1, -196), U2(0, 6, 0, 88), C3(18, 18, 18), 0, 6, U2(0, 0, 0, 0)
-    local lay = Instance.new("UIListLayout", list)
-    lay.SortOrder, lay.Padding = Enum.SortOrder.LayoutOrder, UDim.new(0, 2)
+    local list = Instance.new("ScrollingFrame", parent) list.Size, list.Position, list.BackgroundColor3, list.BorderSizePixel, list.ScrollBarThickness, list.CanvasSize = U2(1, -12, 1, -196), U2(0, 6, 0, 88), C3(18, 18, 18), 0, 6, U2(0, 0, 0, 0)
+    local lay = Instance.new("UIListLayout", list) lay.SortOrder, lay.Padding = Enum.SortOrder.LayoutOrder, UDim.new(0, 2)
     lay:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() list.CanvasSize = U2(0, 0, 0, lay.AbsoluteContentSize.Y + 4) end)
 
-    local detail = Instance.new("TextBox", parent)
-    detail.Size, detail.Position, detail.BackgroundColor3, detail.TextColor3, detail.Font, detail.TextSize = U2(1, -12, 0, 92), U2(0, 6, 1, -98), C3(12, 12, 12), C3(220, 220, 220), F_GM, 12
+    local detail = Instance.new("TextBox", parent) detail.Size, detail.Position, detail.BackgroundColor3, detail.TextColor3, detail.Font, detail.TextSize = U2(1, -12, 0, 92), U2(0, 6, 1, -98), C3(12, 12, 12), C3(220, 220, 220), F_GM, 12
     detail.TextXAlignment, detail.TextYAlignment, detail.TextWrapped, detail.ClearTextOnFocus, detail.TextEditable, detail.MultiLine, detail.BorderSizePixel, detail.Text = Enum.TextXAlignment.Left, Enum.TextYAlignment.Top, true, false, false, true, 0, "Nothing selected."
 
     local function setStatus(txt) status.Text = txt end
@@ -454,15 +401,11 @@ local function buildSpy(parent)
 
     buttons.Full.MouseButton1Click:Connect(function()
         setStatus("Scanning Remotes...")
-        local out = {}
-        push(out, "Full Scan", "Remote scan triggered.")
-        view = "scan"
-        scanEntries = out
-        render()
+        local out = {} push(out, "Full Scan", "Remote scan triggered.")
+        view = "scan" scanEntries = out render()
     end)
     buttons.Clear.MouseButton1Click:Connect(function()
-        scanEntries, liveEntries, selectedBody, detail.Text = {}, {}, "", "Cleared."
-        render()
+        scanEntries, liveEntries, selectedBody, detail.Text = {}, {}, "", "Cleared." render()
     end)
     buttons.Listen.MouseButton1Click:Connect(function()
         listening = not listening
@@ -482,10 +425,8 @@ local function buildSpy(parent)
     copyBtn.MouseButton1Click:Connect(function()
         local text = detail.Text or ""
         if text == "" then return end
-        if type(setclipboard) == "function" then
-            pcall(setclipboard, text) setStatus("Copied")
-        elseif type(toclipboard) == "function" then
-            pcall(toclipboard, text) setStatus("Copied")
+        if type(setclipboard) == "function" then pcall(setclipboard, text) setStatus("Copied")
+        elseif type(toclipboard) == "function" then pcall(toclipboard, text) setStatus("Copied")
         else setStatus("No setclipboard.") end
     end)
 
@@ -503,16 +444,13 @@ local function buildSpy(parent)
             local content = table.concat(out, "\n\n")
             if isfile and isfile(dumpFileName) and readfile then
                 writefile(dumpFileName, readfile(dumpFileName) .. "\n\n=== NEW DUMP ===\n\n" .. content)
-            else
-                writefile(dumpFileName, content)
-            end
+            else writefile(dumpFileName, content) end
         end)
         setStatus("Dumped " .. #source .. " items to " .. dumpFileName)
     end)
 
     parent:GetPropertyChangedSignal("Visible"):Connect(function() if parent.Visible then render() end end)
 end
-
 pcall(buildSpy, spyFrame)
 
 -- ==========================================
@@ -564,9 +502,7 @@ local function clickUIPath(pathStr)
             else current = current:FindFirstChild(p) end
             if not current then return false end
         end
-        if current and current:IsA("GuiButton") and firesignal then
-            firesignal(current.MouseButton1Click)
-        end
+        if current and current:IsA("GuiButton") and firesignal then firesignal(current.MouseButton1Click) end
     end)
 end
 
@@ -719,7 +655,7 @@ end
 hBtn.MouseButton1Click:Connect(function() setHalState(not isHal) if SaveState then SaveState() end end)
 
 -- ==========================================
--- 6. CASH-ONLY GRADER
+-- 6. NETWORK INTERCEPT GRADER (CASH ONLY)
 -- ==========================================
 local GraderAPI = {}
 
@@ -801,6 +737,7 @@ local function bGrader(pFrame, sData, pcData, rName, aName, gList, gRanks)
     tgBtn.MouseButton1Click:Connect(function() gScr.Visible = not gScr.Visible end)
     
     local cTypeLbl = Instance.new("TextLabel", rPnl) cTypeLbl.Size, cTypeLbl.Position, cTypeLbl.BackgroundColor3, cTypeLbl.TextColor3, cTypeLbl.Text, cTypeLbl.Font, cTypeLbl.TextSize, cTypeLbl.BorderSizePixel = U2(1,0,0,30), U2(0,0,0,100), C3(40,120,60), C3(255,255,255), "Currency: Cash Only", F_GB, 13, 0
+    
     local anBtn = Instance.new("TextButton", rPnl) anBtn.Size, anBtn.Position, anBtn.BackgroundColor3, anBtn.TextColor3, anBtn.Text, anBtn.Font, anBtn.TextSize, anBtn.BorderSizePixel = U2(1,0,0,30), U2(0,0,0,140), C3(40,200,120), C3(255,255,255), "[X] Auto Next Item", F_GB, 13, 0
     local apBtn = Instance.new("TextButton", rPnl) apBtn.Size, apBtn.Position, apBtn.BackgroundColor3, apBtn.TextColor3, apBtn.Text, apBtn.Font, apBtn.TextSize, apBtn.BorderSizePixel = U2(1,0,0,30), U2(0,0,0,180), C3(40,200,120), C3(255,255,255), "[X] Auto Next Pack", F_GB, 13, 0
     
@@ -828,7 +765,25 @@ local function bGrader(pFrame, sData, pcData, rName, aName, gList, gRanks)
     apBtn.MouseButton1Click:Connect(function() anP = not anP apBtn.Text, apBtn.BackgroundColor3 = anP and "[X] Auto Next Pack" or "[ ] Auto Next Pack", anP and C3(40,200,120) or C3(50,50,50) if SaveConfig then SaveConfig() end end)
     
     local isG, rEvt = false, nil
+    local waitingRoll = false
+    local rollGrade = nil
     pcall(function() rEvt = RS:WaitForChild("Remotes"):WaitForChild(rName) end)
+    
+    if rEvt then rEvt.OnClientEvent:Connect(function(...) 
+        if not isG then return end
+        local fullStr = ""
+        for _, v in ipairs({...}) do fullStr = fullStr .. " " .. string.upper(stripTags(tostring(v))) end
+        fullStr = string.gsub(fullStr, "S%s*%+", "S+") 
+        
+        local bestRank, bestGrade = -1, nil
+        for g, rank in pairs(gRanks) do
+            local safeG = string.gsub(g, "%+", "%%+")
+            if string.match(fullStr, "%A" .. safeG .. "%A") or string.match(fullStr, "^" .. safeG .. "%A") or string.match(fullStr, "%A" .. safeG .. "$") or fullStr == safeG or string.match(fullStr, " " .. safeG .. " ") then
+                if rank > bestRank then bestRank = rank; bestGrade = g end
+            end
+        end
+        if bestGrade then rollGrade = bestGrade end
+    end) end
     
     local function setGraderRunning(state)
         if not rEvt then sgBtn.Text = "ERR" return end 
@@ -840,18 +795,15 @@ local function bGrader(pFrame, sData, pcData, rName, aName, gList, gRanks)
             for _, pD in ipairs(sData) do 
                 if SData[pD.Name] then 
                     for _, iN in ipairs(pcData[pD.Name] or {}) do 
-                        if SData[pD.Name].items[iN] then 
-                            table.insert(aQ, {Pack=pD.Name, Item=iN}) 
-                        end 
+                        if SData[pD.Name].items[iN] then table.insert(aQ, {Pack=pD.Name, Item=iN}) end 
                     end 
                 end 
             end
             if #aQ == 0 then isG = false sgBtn.Text = "ERR: NO ITEMS" if SaveState then SaveState() end return end
             
             local cIdx = 1
-            isG = true
-            sgBtn.Text = "Stop Grader"
-            sgBtn.BackgroundColor3 = C3(200,40,40)
+            isG, waitingRoll, rollGrade = true, false, nil
+            sgBtn.Text, sgBtn.BackgroundColor3 = "Stop Grader", C3(200,40,40)
             if SaveState then SaveState() end
             
             task.spawn(function() 
@@ -865,37 +817,62 @@ local function bGrader(pFrame, sData, pcData, rName, aName, gList, gRanks)
                     end
                     
                     local cUIG = findGradeInUI(cT.Item) 
-                    if cUIG then 
-                        local cRnk, tRnk = gRanks[cUIG] or 0, gRanks[selG] or 10
-                        if cRnk >= tRnk then 
-                            uncheckCard(cT.Pack, cT.Item)
-                            if anC then 
-                                cIdx = cIdx + 1 
-                                local nT = aQ[cIdx] 
-                                if not nT then 
-                                    isG = false sLbl.Text = "Finished" sgBtn.Text, sgBtn.BackgroundColor3 = "Start Grader", C3(40,200,120)
-                                    if SaveState then SaveState() end
-                                    break
-                                elseif nT.Pack ~= cT.Pack and not anP then 
-                                    isG = false sLbl.Text = "Stopped (Pack)" sgBtn.Text, sgBtn.BackgroundColor3 = "Start Grader", C3(40,200,120)
-                                    if SaveState then SaveState() end
-                                    break
-                                else 
-                                    sLbl.Text = "Skipped: " .. nT.Item 
-                                    task.wait(0.2) 
-                                end 
-                            else 
-                                isG = false sLbl.Text = "Met ("..cUIG..")" sgBtn.Text, sgBtn.BackgroundColor3 = "Start Grader", C3(40,200,120)
+                    local targetRank = gRanks[selG] or 10
+                    
+                    if cUIG and gRanks[cUIG] and gRanks[cUIG] >= targetRank then 
+                        uncheckCard(cT.Pack, cT.Item)
+                        if anC then 
+                            cIdx = cIdx + 1 
+                            local nT = aQ[cIdx] 
+                            if not nT then 
+                                isG = false sLbl.Text = "Finished" sgBtn.Text, sgBtn.BackgroundColor3 = "Start Grader", C3(40,200,120)
                                 if SaveState then SaveState() end
                                 break
+                            elseif nT.Pack ~= cT.Pack and not anP then 
+                                isG = false sLbl.Text = "Stopped (Pack)" sgBtn.Text, sgBtn.BackgroundColor3 = "Start Grader", C3(40,200,120)
+                                if SaveState then SaveState() end
+                                break
+                            else 
+                                sLbl.Text = "Skipped: " .. nT.Item 
+                                task.wait(0.2) 
                             end 
-                            continue 
+                        else 
+                            isG = false sLbl.Text = "Met ("..cUIG..")" sgBtn.Text, sgBtn.BackgroundColor3 = "Start Grader", C3(40,200,120)
+                            if SaveState then SaveState() end
+                            break
                         end 
+                        continue 
                     end
                     
                     sLbl.Text = "Grading: " .. cT.Item
+                    rollGrade = nil
+                    waitingRoll = true
                     rEvt:FireServer(aName, cT.Item)
-                    task.wait((tonumber(dInp.Text) or 300)/1000) 
+                    
+                    local delaySec = (tonumber(dInp.Text) or 300) / 1000
+                    local t0 = os.clock()
+                    
+                    while isG and waitingRoll and not rollGrade and (os.clock() - t0) < delaySec do
+                        task.wait(0.05)
+                    end
+                    waitingRoll = false
+                    
+                    local finalGrade = rollGrade or findGradeInUI(cT.Item)
+                    if finalGrade and gRanks[finalGrade] and gRanks[finalGrade] >= targetRank then
+                        uncheckCard(cT.Pack, cT.Item)
+                        if anC then
+                            cIdx = cIdx + 1
+                            local nT = aQ[cIdx]
+                            if not nT then isG = false sLbl.Text = "Finished" sgBtn.Text, sgBtn.BackgroundColor3 = "Start Grader", C3(40,200,120) if SaveState then SaveState() end break
+                            elseif nT.Pack ~= cT.Pack and not anP then isG = false sLbl.Text = "Stopped (Pack)" sgBtn.Text, sgBtn.BackgroundColor3 = "Start Grader", C3(40,200,120) if SaveState then SaveState() end break end
+                        else
+                            isG = false sLbl.Text = "Hit Target!" sgBtn.Text, sgBtn.BackgroundColor3 = "Start Grader", C3(40,200,120) if SaveState then SaveState() end break
+                        end
+                        task.wait(0.2)
+                    else
+                        local elapsed = os.clock() - t0
+                        if elapsed < delaySec then task.wait(delaySec - elapsed) end
+                    end
                 end 
             end) 
         end
