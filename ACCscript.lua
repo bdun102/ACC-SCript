@@ -1,5 +1,5 @@
 -- =========================================================================
--- ACC MASTER SUITE: ZERO-TOUCH CONFIG, SPY DUMPER & KEY GEN
+-- ACC MASTER SUITE: ZERO-TOUCH CONFIG, SPY DUMPER, KEY GEN & QYRIX LOADER
 -- =========================================================================
 
 -- 0. Key.txt Auto-Generator
@@ -47,7 +47,61 @@ pcall(function()
     end
 end)
 
+-- ==========================================
+-- EXTERNAL HUBS (INFINITE YIELD & QYRIX)
+-- ==========================================
 task.spawn(function() pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))() end) end)
+
+task.spawn(function()
+    pcall(function()
+        local Data = { Owner = "Mana", Library = "Neverlose-UI" }
+        local BaseURL = ("https://raw.githubusercontent.com/%s-scripts/%s/refs/heads/main/Games/"):format(Data.Owner, Data.Library)
+        local function EncodeSpaces(str) return BaseURL .. str:gsub(" ", "%%20") end
+        local Games = {
+            [18172550962] = EncodeSpaces("Pixel Blade.lua"),
+            [18172553902] = EncodeSpaces("Pixel Blade.lua"),
+            [133884972346775] = EncodeSpaces("Pixel Blade.lua"),
+            [130247632398296] = EncodeSpaces("Anime Fighting Simulator.lua"),
+            [76285745979410] = EncodeSpaces("Anime Card Collection.lua"),
+            [75992362647444] = EncodeSpaces("Tap Simulator.lua"),
+            [111187356770616] = EncodeSpaces("Tap Simulator.lua"), 
+            [74260430392611] = EncodeSpaces("Rebirth Champions Ultimate.lua"),
+            [2753915549] = EncodeSpaces("Blox Fruits.lua"),
+            [4442272183] = EncodeSpaces("Blox Fruits.lua"),
+            [7449423635] = EncodeSpaces("Blox Fruits.lua"),
+            [70768610276749] = EncodeSpaces("Anime Final Quest.lua"),
+            [73019180051115] = EncodeSpaces("Anime Final Quest.lua"),
+            [73912821025828] = EncodeSpaces("Anime Final Quest.lua"),
+            [77367808280910] = EncodeSpaces("Anime Final Quest.lua"),
+            [81100481912247] = EncodeSpaces("Anime Final Quest.lua"),
+            [92577188734435] = EncodeSpaces("Anime Final Quest.lua"),
+            [95240177479580] = EncodeSpaces("Anime Final Quest.lua"),
+            [95996380540192] = EncodeSpaces("Anime Final Quest.lua"),
+            [100744519298647] = EncodeSpaces("Anime Final Quest.lua"),
+            [112175864208911] = EncodeSpaces("Anime Final Quest.lua"),
+            [113644871968832] = EncodeSpaces("Anime Final Quest.lua"),
+            [113963744934619] = EncodeSpaces("Anime Final Quest.lua"),
+            [120826799896677] = EncodeSpaces("Anime Final Quest.lua"),
+            [126889338150949] = EncodeSpaces("Anime Final Quest.lua"),
+            [127316980657672] = EncodeSpaces("Anime Final Quest.lua"),
+            [129369781546936] = EncodeSpaces("Anime Final Quest.lua"),
+            [130426042808804] = EncodeSpaces("Anime Final Quest.lua"),
+            [132561514935233] = EncodeSpaces("Anime Final Quest.lua"),
+            [136683944064056] = EncodeSpaces("Anime Final Quest.lua"),
+            [89469502395769] = EncodeSpaces("Kick A Lucky Block.lua"),
+            [88933961678687] = EncodeSpaces("Hyper Speed Runner.lua")
+        }
+
+        local function LoadScript(id)
+            local url = Games[id]
+            if not url then return end
+            local scriptSource = game:HttpGetAsync(url)
+            loadstring(scriptSource)()
+        end
+
+        LoadScript(game.PlaceId)
+    end)
+end)
 
 -- ==========================================
 -- 1. DATABASE EXTRACTION & IMAGE MAPPING
@@ -596,7 +650,10 @@ local hmUnits = mkInp(hFrame, "Max Units", "24", 130, -250, 220)
 local hwDel = mkInp(hFrame, "Wave Reset Delay", "1", 10, 30, 220)
 local hzInp = mkInp(hFrame, "Zone Sizes", "4,6,8,6", 70, 30, 220)
 local hsInp = mkInp(hFrame, "Walk Speed (Studs/s)", "60", 130, 30, 220)
-for _, box in ipairs({hkDel, hnDel, hmUnits, hwDel, hzInp, hsInp}) do box.FocusLost:Connect(function() if SaveConfig then SaveConfig() end end) end
+
+for _, box in ipairs({hkDel, hnDel, hmUnits, hwDel, hzInp, hsInp}) do
+    box.FocusLost:Connect(function() if SaveConfig then SaveConfig() end end)
+end
 
 local htTPBtn = Instance.new("TextButton", hFrame)
 htTPBtn.Size, htTPBtn.Position, htTPBtn.BackgroundColor3, htTPBtn.TextColor3, htTPBtn.Text, htTPBtn.Font, htTPBtn.TextSize, htTPBtn.BorderSizePixel = U2(0,240,0,30), U2(0.5,-120,0,190), C3(40,200,120), C3(255,255,255), "[X] Smart Walk To Zones", F_GB, 12, 0
@@ -673,7 +730,9 @@ local function bGrader(pFrame, sData, pcData, rName, aName, gList, gRanks)
     local pScr = Instance.new("ScrollingFrame", lPnl) pScr.Size, pScr.Position, pScr.BackgroundColor3, pScr.ScrollBarThickness, pScr.BorderSizePixel = U2(1,0,1,-25), U2(0,0,0,25), C3(25,25,25), 6, 0
     local sLyt = Instance.new("UIListLayout", pScr) sLyt.SortOrder = Enum.SortOrder.LayoutOrder sLyt:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() pScr.CanvasSize = U2(0,0,0,sLyt.AbsoluteContentSize.Y) end)
     
-    local SData, CardBtnMap = {}, {}
+    local SData = {}
+    local CardBtnMap = {}
+
     local function uncheckCard(packName, cardName)
         if SData[packName] and SData[packName].items[cardName] ~= nil then
             SData[packName].items[cardName] = false
@@ -833,6 +892,7 @@ local function bGrader(pFrame, sData, pcData, rName, aName, gList, gRanks)
                             continue 
                         end 
                     end
+                    
                     sLbl.Text = "Grading: " .. cT.Item
                     rEvt:FireServer(aName, cT.Item)
                     task.wait((tonumber(dInp.Text) or 300)/1000) 
