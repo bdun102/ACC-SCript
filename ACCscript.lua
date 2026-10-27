@@ -1,5 +1,5 @@
 -- =========================================================================
--- ACC MASTER SUITE: RESTORED ORIGINAL GRADER LOGIC & TOWER ROLLER
+-- ACC MASTER SUITE: STRICT UI ISOLATION, CASH GRADER, LUNAS3VEN & QYRIX
 -- =========================================================================
 
 pcall(function()
@@ -20,6 +20,7 @@ local RS = game:GetService("ReplicatedStorage")
 local HS = game:GetService("HttpService")
 local TS = game:GetService("TweenService")
 local VU = game:GetService("VirtualUser")
+local VIM = game:GetService("VirtualInputManager")
 local U2 = UDim2.new
 local C3 = Color3.fromRGB
 local F_GB = Enum.Font.GothamBold
@@ -43,6 +44,7 @@ end)
 
 -- EXTERNAL HUBS
 task.spawn(function() pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))() end) end)
+task.spawn(function() pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/LunaS3ven/Script/Games/Loader.lua"))() end) end)
 task.spawn(function()
     pcall(function()
         local Data = { Owner = "Mana", Library = "Neverlose-UI" }
@@ -76,7 +78,7 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- 1. DATABASE EXTRACTION (FROM ORIGINAL LOGIC)
+-- 1. DATABASE EXTRACTION
 -- ==========================================
 local GRADE_ORDER = { "UR", "SR", "SS", "S+", "S", "A", "B", "C", "D", "F" }
 local GRADE_LIST = { "F", "D", "C", "B", "A", "S", "S+", "SS", "SR", "UR" }
@@ -183,101 +185,52 @@ pcall(function()
 end)
 
 -- ==========================================
--- 2. LIVE GRADESELECT IMAGE SCANNER (FROM ORIGINAL)
+-- 2. STRICT DIRECT UI LOOKUP (NO CACHE/HEURISTICS)
 -- ==========================================
-local gradeCache, gradeCacheAt = nil, 0
-
-local function isOnlyGradeText(text)
-    local g = parseGrade(text)
-    if not g then return false end
-    local compact = string.upper(stripTags(tostring(text)))
-    compact = string.gsub(compact, "S%s*%+", "S+")
-    compact = string.gsub(compact, "[%s:%-_%[%]%(%)|]+", "")
-    return compact == g
-end
-
-local function scanGrades(force)
-    local now = os.clock()
-    if not force and gradeCache and (now - gradeCacheAt) < 0.35 then return gradeCache end
-    local map = {}
-    gradeCache, gradeCacheAt = map, now
+local function findGradeInUI(iName)
+    if not iName then return nil end
+    local cleanKey = string.lower(stripTags(iName))
+    local targetId = nameToImage[cleanKey]
 
     local pg = LP:FindFirstChild("PlayerGui")
-    local gs = pg and pg:FindFirstChild("GradeSelect")
-    local scroller = gs and gs:FindFirstChild("Frame") and gs.Frame:FindFirstChild("ScrollingFrame")
-    if not scroller then return map end
+    local gsFrame = pg and pg:FindFirstChild("GradeSelect") and pg.GradeSelect:FindFirstChild("Frame") and pg.GradeSelect.Frame:FindFirstChild("ScrollingFrame")
+    
+    if not gsFrame then return nil end
 
-    local function collect(gui, texts, images)
-        if gui:IsA("TextLabel") or gui:IsA("TextButton") then table.insert(texts, gui)
-        elseif gui:IsA("ImageLabel") or gui:IsA("ImageButton") then table.insert(images, gui) end
-        for _, d in ipairs(gui:GetDescendants()) do
-            if d:IsA("TextLabel") or d:IsA("TextButton") then table.insert(texts, d)
-            elseif d:IsA("ImageLabel") or d:IsA("ImageButton") then table.insert(images, d) end
-        end
-    end
-
-    local function looksLikeCard(gui)
-        local texts, images = {}, {} collect(gui, texts, images)
-        if #images > 0 and #texts > 0 then return true end
-        local grades, names = 0, 0
-        for _, t in ipairs(texts) do
-            local lname = string.lower(t.Name)
-            if lname == "grade" or lname == "gradelabel" or isOnlyGradeText(t.Text) then grades = grades + 1
-            elseif stripTags(t.Text) ~= "" then names = names + 1 end
-        end
-        return grades > 0 and names > 0
-    end
-
-    local function absorb(gui)
-        local texts, images = {}, {} collect(gui, texts, images)
-        local grade = nil
-        for _, d in ipairs(texts) do
-            local lname = string.lower(d.Name)
-            if lname == "grade" or lname == "gradelabel" then
-                grade = parseGrade(d.Text)
-                if grade then break end
-            end
-        end
-        if not grade then
-            local bestR = -1
-            for _, d in ipairs(texts) do
-                if #stripTags(d.Text) <= 16 then
-                    local g = parseGrade(d.Text)
-                    if g and GRADE_RANK[g] > bestR then grade, bestR = g, GRADE_RANK[g] end
+    for _, item in ipairs(gsFrame:GetChildren()) do
+        if item:IsA("GuiObject") then
+            local nameLbl = item:FindFirstChild("NameTag") or item:FindFirstChild("ItemName") or item:FindFirstChild("NameLabel", true)
+            local icon = item:FindFirstChild("Icon") or item:FindFirstChildWhichIsA("ImageLabel", true)
+            
+            local isMatch = false
+            
+            if nameLbl and nameLbl:IsA("TextLabel") and stripTags(nameLbl.Text) ~= "" then
+                local txt = string.lower(stripTags(nameLbl.Text))
+                local safeKey = string.gsub(cleanKey, "%p", "%%%1")
+                if txt == cleanKey or string.match(txt, "^" .. safeKey .. "%s*[%[%s]") then
+                    isMatch = true
+                end
+            elseif targetId and icon and icon:IsA("ImageLabel") then
+                if extractId(icon.Image) == targetId then
+                    isMatch = true
                 end
             end
-        end
-        if not grade then return end
-        for _, d in ipairs(texts) do
-            if not isOnlyGradeText(d.Text) then
-                local key = string.lower(stripTags(d.Text))
-                if key ~= "" then map[key] = grade end
+
+            if isMatch then
+                local gLbl = item:FindFirstChild("Grade") or item:FindFirstChild("GradeLabel", true)
+                if gLbl and gLbl:IsA("TextLabel") then
+                    local gTxt = stripTags(gLbl.Text)
+                    if gTxt ~= "" and string.lower(gTxt) ~= "ungraded" and string.lower(gTxt) ~= "none" then
+                        return exactGrade(gTxt) or parseGrade(gTxt)
+                    end
+                end
+                -- We found the exact card but it has no valid grade text.
+                -- Return nil immediately to prevent cross-contaminating from other cards.
+                return nil
             end
         end
-        for _, d in ipairs(images) do
-            local list = imageIdToNames[extractId(d.Image)]
-            if list then for _, n in ipairs(list) do map[n] = grade end end
-        end
     end
-
-    local function collectRows(root, depth, out)
-        if depth > 5 then return end
-        local cards = {}
-        for _, ch in ipairs(root:GetChildren()) do if ch:IsA("GuiObject") and looksLikeCard(ch) then table.insert(cards, ch) end end
-        if #cards >= 2 then for _, c in ipairs(cards) do table.insert(out, c) end return end
-        if depth > 0 and looksLikeCard(root) then table.insert(out, root) return end
-        for _, ch in ipairs(root:GetChildren()) do if ch:IsA("GuiObject") then collectRows(ch, depth + 1, out) end end
-    end
-
-    local rows = {} collectRows(scroller, 0, rows)
-    for _, row in ipairs(rows) do absorb(row) end
-    return map
-end
-
-local function findGradeInUI(iName, force)
-    if not iName then return nil end
-    local map = scanGrades(force)
-    return map[string.lower(stripTags(iName))]
+    return nil
 end
 
 -- ==========================================
@@ -329,7 +282,8 @@ local tabC = Instance.new("Frame", mFrame) tabC.Size, tabC.Position, tabC.Backgr
 
 local function mkTabBtn(name, pIdx, tot)
     local b = Instance.new("TextButton", tabC) b.Size, b.Position, b.Text, b.Font, b.TextSize, b.BorderSizePixel = U2(1/tot,0,1,0), U2((pIdx-1)/tot,0,0,0), name, F_GB, 11, 0
-    b.BackgroundColor3, b.TextColor3 = pIdx==1 and C3(45,45,45) or C3(35,35,35), pIdx==1 and C3(255,255,255) or C3(150,150,150) return b
+    b.BackgroundColor3, b.TextColor3 = pIdx==1 and C3(45,45,45) or C3(35,35,35), pIdx==1 and C3(255,255,255) or C3(150,150,150)
+    return b
 end
 
 local nTabs = 9
@@ -555,7 +509,12 @@ aPotion.MouseButton1Click:Connect(function() setPotionState(not isPotion) if Sav
 local aClaim = Instance.new("TextButton", aFrame) aClaim.Size, aClaim.Position, aClaim.BackgroundColor3, aClaim.TextColor3, aClaim.Text, aClaim.Font, aClaim.TextSize, aClaim.BorderSizePixel = U2(0,240,0,40), U2(0.5,-120,0,120), C3(50,50,50), C3(200,200,200), "[ ] Auto-Claim Group/Daily", F_GB, 13, 0
 local function setClaimState(state)
     isClaim = state aClaim.Text, aClaim.BackgroundColor3 = isClaim and "[X] Auto-Claim Group/Daily" or "[ ] Auto-Claim Group/Daily", isClaim and C3(40,200,120) or C3(50,50,50)
-    if isClaim then task.spawn(function() while isClaim and mFrame:IsDescendantOf(game) do clickUIPath("Players.LocalPlayer.PlayerGui.Rewards.Frame.Claim") clickUIPath("Players.LocalPlayer.PlayerGui.LeaveRewards.Main.Claim") clickUIPath("Players.LocalPlayer.PlayerGui.AdRewards.Frame.Claim") task.wait(10) end end) end
+    if isClaim then task.spawn(function() while isClaim and mFrame:IsDescendantOf(game) do
+        clickUIPath("Players.LocalPlayer.PlayerGui.Rewards.Frame.Claim")
+        clickUIPath("Players.LocalPlayer.PlayerGui.LeaveRewards.Main.Claim")
+        clickUIPath("Players.LocalPlayer.PlayerGui.AdRewards.Frame.Claim")
+        task.wait(10)
+    end end) end
 end
 aClaim.MouseButton1Click:Connect(function() setClaimState(not isClaim) if SaveState then SaveState() end end)
 
@@ -630,7 +589,7 @@ end
 hBtn.MouseButton1Click:Connect(function() setHalState(not isHal) if SaveState then SaveState() end end)
 
 -- ==========================================
--- 6. CASH-ONLY GRADER (WITH ORIGINAL ONCLIENTEVENT LOGIC)
+-- 6. STRICT CASH-ONLY GRADER
 -- ==========================================
 local GraderAPI = {}
 
@@ -740,7 +699,6 @@ local function bGrader(pFrame, sData, pcData, rName, aName, gList, gRanks)
     local rollGrade = nil
     pcall(function() rEvt = RS:WaitForChild("Remotes"):WaitForChild(rName) end)
     
-    -- ORIGINAL ONCLIENTEVENT PARSER
     if rEvt then rEvt.OnClientEvent:Connect(function(...)
         if not waitingRoll then return end
         local args = { ... }
@@ -748,18 +706,12 @@ local function bGrader(pFrame, sData, pcData, rName, aName, gList, gRanks)
         local function consider(g)
             if g and (gRanks[g] or 0) > bestR then best = g bestR = gRanks[g] end
         end
-        if args[1] == aName then
-            consider(gradeFromValue(args[2]))
-            for i = 3, #args do consider(gradeFromValue(args[i])) end
-        elseif #args == 1 then
-            consider(exactGrade(args[1]))
-            if type(args[1]) == "table" then consider(gradeFromValue(args[1]))
-            elseif type(args[1]) == "string" then consider(parseGrade(args[1])) end
-        else
-            for i = 1, #args do
-                consider(exactGrade(args[i]))
-                if type(args[i]) == "table" then consider(gradeFromValue(args[i])) end
-            end
+        for _, arg in ipairs(args) do
+            if type(arg) == "table" then
+                if arg.Grade then consider(exactGrade(arg.Grade)) end
+                if arg.grade then consider(exactGrade(arg.grade)) end
+                if arg.Result then consider(exactGrade(arg.Result)) end
+            elseif type(arg) == "string" then consider(exactGrade(arg)) end
         end
         if best then rollGrade = best end
     end) end
@@ -822,7 +774,7 @@ local function bGrader(pFrame, sData, pcData, rName, aName, gList, gRanks)
                         rollGrade = nil
                         waitingRoll = true
                         
-                        pcall(function() rEvt:FireServer(aName, cT.Item, "Cash") end)
+                        pcall(function() rEvt:FireServer(aName, cT.Item) end)
                         
                         local delaySec = (tonumber(dInp.Text) or 300) / 1000
                         local t0 = os.clock()
@@ -895,7 +847,7 @@ local function bGrader(pFrame, sData, pcData, rName, aName, gList, gRanks)
         end
     end
 end
-bGrader(cFrame, CardSortedPacks, CardPackCards, "Grade", "Roll", sGds, sRnks)
+bGrader(cFrame, CardSortedPacks, CardPackCards, "Grade", "Roll", GRADE_LIST, GRADE_RANK)
 
 -- ==========================================
 -- 7. TOWER TRAIT ROLLER (NETWORK INTERCEPT)
@@ -1004,9 +956,7 @@ local function bTraitRoller(pFrame, sData, pcData)
             if #aQ == 0 then isT = false stBtn.Text = "ERR: NO ITEMS" if SaveState then SaveState() end return end
             
             local parsedTargets = {}
-            for t in string.gmatch(tInp.Text, "[^,]+") do
-                table.insert(parsedTargets, string.lower(stripTags(t)))
-            end
+            for t in string.gmatch(tInp.Text, "[^,]+") do table.insert(parsedTargets, string.lower(stripTags(t))) end
             if #parsedTargets == 0 then isT = false stBtn.Text = "ERR: NO TARGETS" return end
             
             local cIdx = 1
@@ -1129,8 +1079,6 @@ local afkBtn = Instance.new("TextButton", sPnl)
 afkBtn.Size, afkBtn.Position, afkBtn.BackgroundColor3, afkBtn.TextColor3, afkBtn.Text, afkBtn.Font, afkBtn.TextSize, afkBtn.BorderSizePixel = U2(0,240,0,40), U2(0.5,-120,0,145), C3(40,200,120), C3(255,255,255), "[X] Built-In Anti-AFK", F_GB, 13, 0
 
 local afkRun = 0
-local VIM = game:GetService("VirtualInputManager")
-
 local function setAfkState(state)
     isAFK = state
     afkBtn.Text, afkBtn.BackgroundColor3 = isAFK and "[X] Built-In Anti-AFK" or "[ ] Built-In Anti-AFK", isAFK and C3(40,200,120) or C3(50,50,50)
@@ -1140,16 +1088,13 @@ local function setAfkState(state)
         local currentRun = afkRun
         task.spawn(function()
             while isAFK and afkRun == currentRun and mFrame:IsDescendantOf(game) do
-                task.wait(150) -- Wait 2.5 minutes interval
+                task.wait(150)
                 if not isAFK or afkRun ~= currentRun then break end
                 
                 pcall(function()
-                    -- Force character jump
                     local char = LP.Character
                     local hum = char and char:FindFirstChildOfClass("Humanoid")
                     if hum then hum.Jump = true end
-                    
-                    -- Simulate holding 'D' for 1 second
                     VIM:SendKeyEvent(true, Enum.KeyCode.D, false, game)
                     task.wait(1)
                     VIM:SendKeyEvent(false, Enum.KeyCode.D, false, game)
@@ -1160,7 +1105,6 @@ local function setAfkState(state)
 end
 afkBtn.MouseButton1Click:Connect(function() setAfkState(not isAFK) if SaveConfig then SaveConfig() end end)
 
--- Standard Roblox idle bypass failsafe
 LP.Idled:Connect(function()
     if isAFK then pcall(function() VU:CaptureController() VU:ClickButton2(Vector2.new()) end) end
 end)
