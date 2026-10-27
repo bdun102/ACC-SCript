@@ -1127,12 +1127,40 @@ scInp.FocusLost:Connect(function() uiScale.Scale = tonumber(scInp.Text) or 1 if 
 local isAFK = true
 local afkBtn = Instance.new("TextButton", sPnl)
 afkBtn.Size, afkBtn.Position, afkBtn.BackgroundColor3, afkBtn.TextColor3, afkBtn.Text, afkBtn.Font, afkBtn.TextSize, afkBtn.BorderSizePixel = U2(0,240,0,40), U2(0.5,-120,0,145), C3(40,200,120), C3(255,255,255), "[X] Built-In Anti-AFK", F_GB, 13, 0
+
+local afkRun = 0
+local VIM = game:GetService("VirtualInputManager")
+
 local function setAfkState(state)
     isAFK = state
     afkBtn.Text, afkBtn.BackgroundColor3 = isAFK and "[X] Built-In Anti-AFK" or "[ ] Built-In Anti-AFK", isAFK and C3(40,200,120) or C3(50,50,50)
+    
+    if isAFK then
+        afkRun = afkRun + 1
+        local currentRun = afkRun
+        task.spawn(function()
+            while isAFK and afkRun == currentRun and mFrame:IsDescendantOf(game) do
+                task.wait(150) -- Wait 2.5 minutes interval
+                if not isAFK or afkRun ~= currentRun then break end
+                
+                pcall(function()
+                    -- Force character jump
+                    local char = LP.Character
+                    local hum = char and char:FindFirstChildOfClass("Humanoid")
+                    if hum then hum.Jump = true end
+                    
+                    -- Simulate holding 'D' for 1 second
+                    VIM:SendKeyEvent(true, Enum.KeyCode.D, false, game)
+                    task.wait(1)
+                    VIM:SendKeyEvent(false, Enum.KeyCode.D, false, game)
+                end)
+            end
+        end)
+    end
 end
 afkBtn.MouseButton1Click:Connect(function() setAfkState(not isAFK) if SaveConfig then SaveConfig() end end)
 
+-- Standard Roblox idle bypass failsafe
 LP.Idled:Connect(function()
     if isAFK then pcall(function() VU:CaptureController() VU:ClickButton2(Vector2.new()) end) end
 end)
