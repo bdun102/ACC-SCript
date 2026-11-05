@@ -10,13 +10,15 @@ pcall(function()
     end
 end)
 
-local SCRIPT_URL = "" 
+local SCRIPT_URL = ""
+local LOAD_EXTERNAL_HUBS = false
 if not game:IsLoaded() then game.Loaded:Wait() end
 
 local Players = game:GetService("Players")
 local LP = Players.LocalPlayer or Players.PlayerAdded:Wait()
 local UIS = game:GetService("UserInputService")
 local RS = game:GetService("ReplicatedStorage")
+local RF = game:GetService("ReplicatedFirst")
 local HS = game:GetService("HttpService")
 local TS = game:GetService("TweenService")
 local VU = game:GetService("VirtualUser")
@@ -43,9 +45,16 @@ pcall(function()
 end)
 
 -- EXTERNAL HUBS
-task.spawn(function() pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))() end) end)
-task.spawn(function() pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/LunaS3ven/Script/Games/Loader.lua"))() end) end)
 task.spawn(function()
+    if not LOAD_EXTERNAL_HUBS then return end
+    pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))() end)
+end)
+task.spawn(function()
+    if not LOAD_EXTERNAL_HUBS then return end
+    pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/LunaS3ven/Script/Games/Loader.lua"))() end)
+end)
+task.spawn(function()
+    if not LOAD_EXTERNAL_HUBS then return end
     pcall(function()
         local Data = { Owner = "Mana", Library = "Neverlose-UI" }
         local BaseURL = ("https://raw.githubusercontent.com/%s-scripts/%s/refs/heads/main/Games/"):format(Data.Owner, Data.Library)
@@ -80,9 +89,9 @@ end)
 -- ==========================================
 -- 1. DATABASE EXTRACTION
 -- ==========================================
-local GRADE_ORDER = { "UR", "SR", "SS", "S+", "S", "A", "B", "C", "D", "F" }
-local GRADE_LIST = { "F", "D", "C", "B", "A", "S", "S+", "SS", "SR", "UR" }
-local GRADE_RANK = { F = 1, D = 2, C = 3, B = 4, A = 5, S = 6, ["S+"] = 7, SS = 8, SR = 9, UR = 10 }
+local GRADE_ORDER = { "UR", "SR", "SS", "S+", "S", "A", "B", "C", "D", "E", "F" }
+local GRADE_LIST = { "F", "E", "D", "C", "B", "A", "S", "S+", "SS", "SR", "UR" }
+local GRADE_RANK = { F = 1, E = 2, D = 3, C = 4, B = 5, A = 6, S = 7, ["S+"] = 8, SS = 9, SR = 10, UR = 11 }
 
 local function stripTags(str)
     if str == nil then return "" end
@@ -130,58 +139,74 @@ local function exactGrade(v)
     return nil
 end
 
-local CardSortedPacks, CardPackCards = {}, {}
-local nameToImage, imageIdToNames = {}, {}
+local liveDataModule
+local function getLiveRecord(collection, itemName)
+    local ok, record = pcall(function()
+        if not liveDataModule then
+            local moduleScript = RF:FindFirstChild("ReplicatedData")
+            if not moduleScript then return nil end
+            liveDataModule = require(moduleScript)
+        end
+        return liveDataModule.GetData(collection, itemName)
+    end)
+    return ok and type(record) == "table" and record or nil
+end
 
-pcall(function() 
-    local RawImageDB = require(RS.Modules.Config.Core.ImageConfig) 
-    local function parseImgs(tbl)
-        for k, v in pairs(tbl) do
-            if type(v) == "string" and string.find(v, "rbxassetid", 1, true) then
-                local extracted = extractId(v)
-                local cleanName = string.lower(stripTags(k))
-                nameToImage[cleanName] = extracted
-                if not imageIdToNames[extracted] then imageIdToNames[extracted] = {} end
-                table.insert(imageIdToNames[extracted], cleanName)
-            elseif type(v) == "table" then parseImgs(v) end
+local CardSortedPacks, CardPackCards = {}, {}
+local nameToImage, imageIdToNames, cardDisplayNames = {}, {}, {}
+
+pcall(function()
+    local rawImageDb = require(RS.Modules.Config.Core.ImageConfig)
+    local function parseImages(tbl)
+        for key, value in pairs(tbl) do
+            if type(value) == "string" and string.find(value, "rbxassetid", 1, true) then
+                local imageId = extractId(value)
+                local cleanName = string.lower(stripTags(key))
+                nameToImage[cleanName] = imageId
+                imageIdToNames[imageId] = imageIdToNames[imageId] or {}
+                table.insert(imageIdToNames[imageId], cleanName)
+            elseif type(value) == "table" then
+                parseImages(value)
+            end
         end
     end
-    parseImgs(RawImageDB)
+    parseImages(rawImageDb)
+    for key, value in pairs(rawImageDb.Names or {}) do
+        cardDisplayNames[string.lower(stripTags(key))] = string.lower(stripTags(value))
+    end
 end)
 
 pcall(function()
-    local RawCardDB = require(RS.Modules.Config.Core.CardConfig)
-    local targetPacks = RawCardDB.Packs or RawCardDB
-    for k, v in pairs(RawCardDB) do
-        if type(v) == "table" and not v.Price then 
-            local firstChild = next(v)
-            if type(v[firstChild]) == "table" and (v[firstChild].Price or v[firstChild].List) then targetPacks = v break end
-        end
-    end
-    if targetPacks then
-        for pName, pData in pairs(targetPacks) do
-            if type(pData) == "table" then
-                local price = tonumber(pData.Price) or math.huge 
-                local cList, seen = {}, {}
-                if pData.List then
-                    for k, v in pairs(pData.List) do
-                        local name = type(v)=="string" and v or (type(v)=="table" and v.Name or (type(k)=="string" and k or ""))
-                        local cName = stripTags(name)
-                        if cName ~= "" and not seen[cName] then 
-                            seen[cName] = true
-                            table.insert(cList, cName) 
-                        end
-                    end
-                end
-                if #cList > 0 then
-                    local cleanPack = stripTags(pName)
-                    table.insert(CardSortedPacks, {Name = cleanPack, Price = price, Raw = pData})
-                    CardPackCards[cleanPack] = cList
-                end
+    local rawCardDb = require(RS.Modules.Config.Core.CardConfig)
+    local targetPacks = rawCardDb.Packs or rawCardDb
+    for key, value in pairs(rawCardDb) do
+        if type(value) == "table" and not value.Price then
+            local firstChild = next(value)
+            if type(value[firstChild]) == "table" and (value[firstChild].Price or value[firstChild].List) then
+                targetPacks = value
+                break
             end
         end
-        table.sort(CardSortedPacks, function(a, b) return a.Price < b.Price end)
     end
+    for packName, packData in pairs(targetPacks or {}) do
+        if type(packData) == "table" and type(packData.List) == "table" then
+            local cards, seen = {}, {}
+            for key, value in pairs(packData.List) do
+                local name = type(value) == "string" and value or (type(value) == "table" and value.Name or (type(key) == "string" and key or ""))
+                local cleanName = stripTags(name)
+                if cleanName ~= "" and not seen[cleanName] then
+                    seen[cleanName] = true
+                    table.insert(cards, cleanName)
+                end
+            end
+            if #cards > 0 then
+                local cleanPackName = stripTags(packName)
+                table.insert(CardSortedPacks, { Name = cleanPackName, Price = tonumber(packData.Price) or math.huge, Raw = packData })
+                CardPackCards[cleanPackName] = cards
+            end
+        end
+    end
+    table.sort(CardSortedPacks, function(a, b) return a.Price < b.Price end)
 end)
 
 -- ==========================================
@@ -191,42 +216,62 @@ local function findGradeInUI(iName)
     if not iName then return nil end
     local cleanKey = string.lower(stripTags(iName))
     local targetId = nameToImage[cleanKey]
-
+    for _, collection in ipairs({ "Cards", "TowerCards" }) do
+        local record = getLiveRecord(collection, iName)
+        local liveGrade = record and exactGrade(record.Grade)
+        if liveGrade then return liveGrade end
+    end
+    local displayKey = cardDisplayNames[cleanKey]
     local pg = LP:FindFirstChild("PlayerGui")
     local gsFrame = pg and pg:FindFirstChild("GradeSelect") and pg.GradeSelect:FindFirstChild("Frame") and pg.GradeSelect.Frame:FindFirstChild("ScrollingFrame")
-    
     if not gsFrame then return nil end
+
+    local function textValue(node)
+        if node:IsA("TextLabel") or node:IsA("TextButton") or node:IsA("TextBox") then
+            return string.lower(stripTags(node.Text))
+        end
+        return ""
+    end
+
+    local function gradeFromItem(item)
+        local fallback
+        for _, node in ipairs(item:GetDescendants()) do
+            if node:IsA("TextLabel") or node:IsA("TextButton") or node:IsA("TextBox") then
+                local value = stripTags(node.Text)
+                if value ~= "" and string.lower(value) ~= "ungraded" and string.lower(value) ~= "none" then
+                    local grade = exactGrade(value) or parseGrade(value)
+                    if grade then
+                        local nodeName = string.lower(node.Name)
+                        if nodeName == "grade" or nodeName == "gradelabel" then return grade end
+                        fallback = fallback or grade
+                    end
+                end
+            end
+        end
+        return fallback
+    end
 
     for _, item in ipairs(gsFrame:GetChildren()) do
         if item:IsA("GuiObject") then
-            local nameLbl = item:FindFirstChild("NameTag") or item:FindFirstChild("ItemName") or item:FindFirstChild("NameLabel", true)
-            local icon = item:FindFirstChild("Icon") or item:FindFirstChildWhichIsA("ImageLabel", true)
-            
             local isMatch = false
-            
-            if nameLbl and nameLbl:IsA("TextLabel") and stripTags(nameLbl.Text) ~= "" then
-                local txt = string.lower(stripTags(nameLbl.Text))
-                local safeKey = string.gsub(cleanKey, "%p", "%%%1")
-                if txt == cleanKey or string.match(txt, "^" .. safeKey .. "%s*[%[%s]") then
+            for _, node in ipairs(item:GetDescendants()) do
+                local text = textValue(node)
+                if text == cleanKey or (displayKey and text == displayKey) or string.sub(text, 1, #cleanKey + 1) == cleanKey .. " " then
                     isMatch = true
-                end
-            elseif targetId and icon and icon:IsA("ImageLabel") then
-                if extractId(icon.Image) == targetId then
-                    isMatch = true
+                    break
                 end
             end
-
-            if isMatch then
-                local gLbl = item:FindFirstChild("Grade") or item:FindFirstChild("GradeLabel", true)
-                if gLbl and gLbl:IsA("TextLabel") then
-                    local gTxt = stripTags(gLbl.Text)
-                    if gTxt ~= "" and string.lower(gTxt) ~= "ungraded" and string.lower(gTxt) ~= "none" then
-                        return exactGrade(gTxt) or parseGrade(gTxt)
+            if not isMatch and targetId then
+                for _, node in ipairs(item:GetDescendants()) do
+                    if (node:IsA("ImageLabel") or node:IsA("ImageButton")) and extractId(node.Image) == targetId then
+                        isMatch = true
+                        break
                     end
                 end
-                -- We found the exact card but it has no valid grade text.
-                -- Return nil immediately to prevent cross-contaminating from other cards.
-                return nil
+            end
+            if isMatch then
+                local grade = gradeFromItem(item)
+                if grade then return grade end
             end
         end
     end
@@ -239,8 +284,33 @@ end
 local AllItemButtons = {}
 local SaveConfig, SaveState 
 
-local targetParent = (gethui and gethui()) or game:GetService("CoreGui") or LP.PlayerGui
-if targetParent:FindFirstChild("ACC_Suite") then targetParent.ACC_Suite:Destroy() end
+local sharedEnv = (type(getgenv) == "function" and getgenv()) or _G
+local function safeGuiParent()
+    local ok, parent = pcall(function()
+        if type(gethui) == "function" then return gethui() end
+        return game:GetService("CoreGui")
+    end)
+    return ok and parent or LP:FindFirstChild("PlayerGui")
+end
+
+local cleanupParents = { safeGuiParent(), game:GetService("CoreGui"), LP:FindFirstChild("PlayerGui") }
+local seenCleanupParents = {}
+for _, parent in ipairs(cleanupParents) do
+    if parent and not seenCleanupParents[parent] then
+        seenCleanupParents[parent] = true
+        local oldSuite = parent:FindFirstChild("ACC_Suite")
+        if oldSuite then oldSuite:Destroy() end
+    end
+end
+if type(sharedEnv.ACC_SpyBound) == "table" then
+    for remote, connection in pairs(sharedEnv.ACC_SpyBound) do
+        pcall(function() connection:Disconnect() end)
+        sharedEnv.ACC_SpyBound[remote] = nil
+    end
+end
+sharedEnv.ACC_SpyOn = false
+
+local targetParent = safeGuiParent() or LP:FindFirstChild("PlayerGui")
 
 local sg = Instance.new("ScreenGui", targetParent)
 sg.Name = "ACC_Suite"
@@ -253,8 +323,11 @@ sqBtn.Text, sqBtn.Font, sqBtn.TextSize, sqBtn.Visible, sqBtn.Active, sqBtn.Dragg
 Instance.new("UICorner", sqBtn).CornerRadius = UDim.new(0, 8)
 
 local mFrame = Instance.new("Frame", sg)
-mFrame.Size, mFrame.Position, mFrame.BackgroundColor3, mFrame.BorderSizePixel = U2(0, 600, 0, 480), U2(0.5, -300, 0.5, -240), C3(35, 35, 35), 0
+mFrame.Size, mFrame.Position, mFrame.BackgroundColor3, mFrame.BorderSizePixel = U2(0.94, 0, 0.88, 0), U2(0.5, 0, 0.5, 0), C3(35, 35, 35), 0
 mFrame.Active, mFrame.Draggable, mFrame.ClipsDescendants = true, true, true
+local frameConstraint = Instance.new("UISizeConstraint", mFrame)
+frameConstraint.MinSize = Vector2.new(360, 420)
+frameConstraint.MaxSize = Vector2.new(980, 760)
 
 task.spawn(function()
     while task.wait(2) do
@@ -271,29 +344,34 @@ task.spawn(function()
 end)
 
 local uiScale = Instance.new("UIScale", mFrame) uiScale.Scale = 1
-local tBar = Instance.new("Frame", mFrame) tBar.Size, tBar.BackgroundColor3, tBar.BorderSizePixel = U2(1, 0, 0, 30), C3(20, 20, 20), 0
+local tBar = Instance.new("Frame", mFrame) tBar.Size, tBar.BackgroundColor3, tBar.BorderSizePixel = U2(1, 0, 0, 40), C3(20, 20, 20), 0
 local title = Instance.new("TextLabel", tBar) title.Size, title.Position, title.BackgroundTransparency, title.TextColor3, title.Text, title.Font, title.TextSize, title.TextXAlignment = U2(1,-60,1,0), U2(0,10,0,0), 1, C3(255,255,255), "ACC Master Suite (" .. LP.Name .. ")", F_GB, 14, Enum.TextXAlignment.Left
 
-local minBtn = Instance.new("TextButton", tBar) minBtn.Size, minBtn.Position, minBtn.BackgroundColor3, minBtn.TextColor3, minBtn.Text, minBtn.Font, minBtn.TextSize, minBtn.BorderSizePixel = U2(0,30,0,30), U2(1,-30,0,0), C3(200,180,40), C3(25,25,25), "—", F_GB, 12, 0
+local minBtn = Instance.new("TextButton", tBar) minBtn.Size, minBtn.Position, minBtn.BackgroundColor3, minBtn.TextColor3, minBtn.Text, minBtn.Font, minBtn.TextSize, minBtn.BorderSizePixel = U2(0,40,0,40), U2(1,-40,0,0), C3(200,180,40), C3(25,25,25), "—", F_GB, 14, 0
 minBtn.MouseButton1Click:Connect(function() mFrame.Visible = false sqBtn.Visible = true end)
 sqBtn.MouseButton1Click:Connect(function() sqBtn.Visible = false mFrame.Visible = true end)
 
-local tabC = Instance.new("Frame", mFrame) tabC.Size, tabC.Position, tabC.BackgroundColor3, tabC.BorderSizePixel = U2(1,0,0,35), U2(0,0,0,30), C3(25,25,25), 0
+local tabC = Instance.new("ScrollingFrame", mFrame)
+tabC.Size, tabC.Position, tabC.BackgroundColor3, tabC.BorderSizePixel = U2(1, 0, 0, 42), U2(0, 0, 0, 40), C3(25, 25, 25), 0
+tabC.Active, tabC.ScrollingDirection, tabC.ScrollBarThickness, tabC.CanvasSize = true, Enum.ScrollingDirection.X, 4, U2(0, 0, 0, 0)
+tabC.AutomaticCanvasSize = Enum.AutomaticSize.X
+local tabLayout = Instance.new("UIListLayout", tabC)
+tabLayout.FillDirection, tabLayout.SortOrder, tabLayout.Padding = Enum.FillDirection.Horizontal, Enum.SortOrder.LayoutOrder, UDim.new(0, 2)
 
 local function mkTabBtn(name, pIdx, tot)
-    local b = Instance.new("TextButton", tabC) b.Size, b.Position, b.Text, b.Font, b.TextSize, b.BorderSizePixel = U2(1/tot,0,1,0), U2((pIdx-1)/tot,0,0,0), name, F_GB, 11, 0
+    local b = Instance.new("TextButton", tabC) b.Size, b.LayoutOrder, b.Text, b.Font, b.TextSize, b.BorderSizePixel = U2(0, 94, 1, 0), pIdx, name, F_GB, 12, 0
     b.BackgroundColor3, b.TextColor3 = pIdx==1 and C3(45,45,45) or C3(35,35,35), pIdx==1 and C3(255,255,255) or C3(150,150,150)
     return b
 end
 
-local nTabs = 9
+local nTabs = 10
 local tBtns = {
     mkTabBtn("Cards",1,nTabs), mkTabBtn("Tower",2,nTabs), mkTabBtn("Event",3,nTabs), mkTabBtn("Auto",4,nTabs), 
-    mkTabBtn("Fish",5,nTabs), mkTabBtn("Gems",6,nTabs), mkTabBtn("HUD",7,nTabs), mkTabBtn("Spy",8,nTabs), mkTabBtn("⚙",9,nTabs)
+    mkTabBtn("Figurines",5,nTabs), mkTabBtn("Fish",6,nTabs), mkTabBtn("Gems",7,nTabs), mkTabBtn("HUD",8,nTabs), mkTabBtn("Spy",9,nTabs), mkTabBtn("⚙",10,nTabs)
 }
 local tFrames = {}
 for i=1, nTabs do
-    local f = Instance.new("Frame", mFrame) f.Size, f.Position, f.BackgroundTransparency, f.Visible = U2(1,0,1,-65), U2(0,0,0,65), 1, i==1
+    local f = Instance.new("Frame", mFrame) f.Size, f.Position, f.BackgroundTransparency, f.Visible = U2(1,0,1,-82), U2(0,0,0,82), 1, i==1
     tFrames[i] = f
 end
 for i, btn in ipairs(tBtns) do
@@ -304,13 +382,36 @@ for i, btn in ipairs(tBtns) do
         end
     end)
 end
-local cFrame, tFrame, hFrame, aFrame, fFrame, gFrame, hudTabFrame, spyFrame, sFrame = unpack(tFrames)
+local cFrame, tFrame, hFrame, aFrame, figFrame, fFrame, gFrame, hudTabFrame, spyFrame, sFrame = unpack(tFrames)
 
 local function mkInp(p, lblText, def, py, xOff, wid)
     wid = wid or 240
     local l = Instance.new("TextLabel", p) l.Size, l.Position, l.BackgroundTransparency, l.TextColor3, l.Text, l.Font, l.TextSize, l.TextXAlignment = U2(0,wid,0,20), U2(0.5,xOff,0,py), 1, C3(200,200,200), lblText, F_GB, 12, Enum.TextXAlignment.Left
-    local b = Instance.new("TextBox", p) b.Size, b.Position, b.BackgroundColor3, b.TextColor3, b.Text, b.Font, b.TextSize, b.BorderSizePixel = U2(0,wid,0,30), U2(0.5,xOff,0,py+20), C3(15,15,15), C3(255,255,255), def, F_GM, 14, 0
+    local b = Instance.new("TextBox", p) b.Size, b.Position, b.BackgroundColor3, b.TextColor3, b.Text, b.Font, b.TextSize, b.BorderSizePixel = U2(0,wid,0,36), U2(0.5,xOff,0,py+20), C3(15,15,15), C3(255,255,255), def, F_GM, 14, 0
     return b
+end
+
+local function mkDropdown(parent, labelText, options, defaultValue, y, width)
+    width = width or 260
+    local label = Instance.new("TextLabel", parent)
+    label.Size, label.Position, label.BackgroundTransparency, label.TextColor3, label.Text, label.Font, label.TextSize = U2(0, width, 0, 20), U2(0.5, -width / 2, 0, y), 1, C3(200, 200, 200), labelText, F_GB, 12
+    local button = Instance.new("TextButton", parent)
+    button.Size, button.Position, button.BackgroundColor3, button.TextColor3, button.Text, button.Font, button.TextSize, button.BorderSizePixel = U2(0, width, 0, 36), U2(0.5, -width / 2, 0, y + 20), C3(15, 15, 15), C3(255, 255, 255), tostring(defaultValue or options[1] or ""), F_GM, 14, 0
+    local menu = Instance.new("ScrollingFrame", parent)
+    menu.Size, menu.Position, menu.BackgroundColor3, menu.BorderSizePixel, menu.ScrollBarThickness, menu.Visible, menu.ZIndex = U2(0, width, 0, 180), U2(0.5, -width / 2, 0, y + 58), C3(25, 25, 25), 0, 6, false, 20
+    menu.CanvasSize = U2(0, 0, 0, #options * 36)
+    local layout = Instance.new("UIListLayout", menu)
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    for index, option in ipairs(options) do
+        local item = Instance.new("TextButton", menu)
+        item.Size, item.LayoutOrder, item.BackgroundColor3, item.TextColor3, item.Text, item.Font, item.TextSize, item.BorderSizePixel, item.ZIndex = U2(1, -8, 0, 36), index, C3(35, 35, 35), C3(255, 255, 255), tostring(option), F_GM, 13, 0, 21
+        item.MouseButton1Click:Connect(function()
+            button.Text = tostring(option)
+            menu.Visible = false
+        end)
+    end
+    button.MouseButton1Click:Connect(function() menu.Visible = not menu.Visible end)
+    return button
 end
 
 -- ==========================================
@@ -330,8 +431,8 @@ local function buildSpy(parent)
     status.BackgroundTransparency, status.Size, status.Position, status.Font, status.TextSize = 1, U2(1, -165, 0, 16), U2(0, 8, 0, 68), F_GM, 12
     status.TextXAlignment, status.TextColor3, status.Text = Enum.TextXAlignment.Left, C3(180, 180, 180), "Full maps the game. Listen logs calls."
 
-    local copyBtn = Instance.new("TextButton", parent) copyBtn.Size, copyBtn.Position, copyBtn.BackgroundColor3, copyBtn.TextColor3, copyBtn.Text, copyBtn.Font, copyBtn.TextSize, copyBtn.BorderSizePixel = U2(0, 64, 0, 18), U2(1, -70, 0, 66), C3(40, 40, 40), C3(255, 255, 255), "Copy", F_GB, 12, 0
-    local dumpBtn = Instance.new("TextButton", parent) dumpBtn.Size, dumpBtn.Position, dumpBtn.BackgroundColor3, dumpBtn.TextColor3, dumpBtn.Text, dumpBtn.Font, dumpBtn.TextSize, dumpBtn.BorderSizePixel = U2(0, 80, 0, 18), U2(1, -155, 0, 66), C3(40, 40, 40), C3(255, 255, 255), "Dump File", F_GB, 12, 0
+    local copyBtn = Instance.new("TextButton", parent) copyBtn.Size, copyBtn.Position, copyBtn.BackgroundColor3, copyBtn.TextColor3, copyBtn.Text, copyBtn.Font, copyBtn.TextSize, copyBtn.BorderSizePixel, copyBtn.ZIndex, copyBtn.Visible = U2(0, 64, 0, 18), U2(1, -70, 0, 66), C3(40, 40, 40), C3(255, 255, 255), "Copy", F_GB, 12, 0, 10, true
+    local dumpBtn = Instance.new("TextButton", parent) dumpBtn.Size, dumpBtn.Position, dumpBtn.BackgroundColor3, dumpBtn.TextColor3, dumpBtn.Text, dumpBtn.Font, dumpBtn.TextSize, dumpBtn.BorderSizePixel, dumpBtn.ZIndex, dumpBtn.Visible = U2(0, 80, 0, 18), U2(1, -155, 0, 66), C3(40, 40, 40), C3(255, 255, 255), "Dump File", F_GB, 12, 0, 10, true
 
     local list = Instance.new("ScrollingFrame", parent) list.Size, list.Position, list.BackgroundColor3, list.BorderSizePixel, list.ScrollBarThickness, list.CanvasSize = U2(1, -12, 1, -196), U2(0, 6, 0, 88), C3(18, 18, 18), 0, 6, U2(0, 0, 0, 0)
     local lay = Instance.new("UIListLayout", list) lay.SortOrder, lay.Padding = Enum.SortOrder.LayoutOrder, UDim.new(0, 2)
@@ -371,11 +472,38 @@ local function buildSpy(parent)
         return table.concat(names, ".")
     end
 
+    local function formatValue(value, depth, seen)
+        depth, seen = depth or 0, seen or {}
+        local valueType = typeof(value)
+        if value == nil then return "nil" end
+        if valueType == "string" then return string.format("%q", value) end
+        if valueType == "number" or valueType == "boolean" then return tostring(value) end
+        if valueType == "Instance" then
+            local ok, full = pcall(function() return value:GetFullName() end)
+            return "<" .. (ok and full or value.Name) .. ">"
+        end
+        if valueType ~= "table" then return "<" .. valueType .. ">" end
+        if seen[value] then return "<cycle>" end
+        if depth >= 2 then return "{...}" end
+        seen[value] = true
+        local parts, count = {}, 0
+        for key, child in pairs(value) do
+            count = count + 1
+            if count > 20 then
+                parts[#parts + 1] = "..."
+                break
+            end
+            parts[#parts + 1] = "[" .. formatValue(key, depth + 1, seen) .. "]=" .. formatValue(child, depth + 1, seen)
+        end
+        seen[value] = nil
+        return "{" .. table.concat(parts, ", ") .. "}"
+    end
+
     local function onOutgoing(self, method, args, results)
         if not listening then return end
         local path = instPath(self)
         local argStr = ""
-        if args and type(args) == "table" then for i, v in ipairs(args) do argStr = argStr .. tostring(v) .. (i < #args and ", " or "") end end
+        if args and type(args) == "table" then for i, v in ipairs(args) do argStr = argStr .. formatValue(v) .. (i < #args and ", " or "") end end
         push(liveEntries, "[OUT] " .. method .. " " .. (self.Name or path), path .. "\n" .. method .. "(" .. argStr .. ")", method .. " " .. path)
         if view == "live" then queueRender() end
     end
@@ -383,7 +511,7 @@ local function buildSpy(parent)
         if not listening then return end
         local path = instPath(remote)
         local argStr = ""
-        if args and type(args) == "table" then for i, v in ipairs(args) do argStr = argStr .. tostring(v) .. (i < #args and ", " or "") end end
+        if args and type(args) == "table" then for i, v in ipairs(args) do argStr = argStr .. formatValue(v) .. (i < #args and ", " or "") end end
         push(liveEntries, "[IN] " .. (remote.Name or "event"), path .. "\nOnClientEvent(" .. argStr .. ")", "IN " .. path)
         if view == "live" then queueRender() end
     end
@@ -408,19 +536,95 @@ local function buildSpy(parent)
         return n
     end
 
-    local labels = { "Full", "Listen", "Clear" }
-    local buttons = {}
-    for i, name in ipairs(labels) do
-        local b = Instance.new("TextButton", bar) b.Size, b.Position, b.BackgroundColor3, b.TextColor3, b.Text, b.Font, b.TextSize, b.BorderSizePixel = U2(1 / #labels, -2, 1, 0), U2((i - 1) / #labels, 0, 0, 0), C3(40, 40, 40), C3(255, 255, 255), name, F_GB, 11, 0 buttons[name] = b
+    local function scanAll()
+        local out, seen = {}, {}
+        local function add(title, body)
+            out[#out + 1] = { title = title, body = body }
+        end
+        local function fullName(inst)
+            local ok, value = pcall(function() return inst:GetFullName() end)
+            return ok and value or instPath(inst)
+        end
+        for _, root in ipairs({ RS, game:GetService("ReplicatedFirst"), LP:FindFirstChild("PlayerGui") }) do
+            if root then
+                local ok, descendants = pcall(function() return root:GetDescendants() end)
+                if ok then
+                    for _, inst in ipairs(descendants) do
+                        local cls = inst.ClassName
+                        if cls == "RemoteEvent" or cls == "UnreliableRemoteEvent" or cls == "RemoteFunction" or inst:IsA("ModuleScript") then
+                            local path = fullName(inst)
+                            if not seen[path] then
+                                seen[path] = true
+                                add("[" .. cls .. "] " .. inst.Name, path)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        local pg = LP:FindFirstChild("PlayerGui")
+        if pg then
+            for _, gui in ipairs(pg:GetChildren()) do
+                if gui:IsA("ScreenGui") then
+                    add("[GUI] " .. gui.Name, fullName(gui) .. "\nEnabled: " .. tostring(gui.Enabled))
+                end
+            end
+        end
+        table.sort(out, function(a, b) return a.title < b.title end)
+        return out
     end
-    buttons.Full.MouseButton1Click:Connect(function() setStatus("Scanning Remotes...") local out = {} push(out, "Full Scan", "Remote scan triggered.") view = "scan" scanEntries = out render() end)
+
+    local function installHook()
+        if env.ACC_SpyHooked then
+            hookNote = "outgoing hook already active"
+            return true
+        end
+        if type(hookmetamethod) ~= "function" or type(getnamecallmethod) ~= "function" then
+            hookNote = "outgoing hook unavailable; incoming only"
+            return false
+        end
+        local old
+        local function handler(self, ...)
+            local method = getnamecallmethod()
+            if env.ACC_SpyOn and not env.ACC_SpyBusy and (method == "FireServer" or method == "InvokeServer") and typeof(self) == "Instance" then
+                env.ACC_SpyBusy = true
+                pcall(env.ACC_SpyDispatch, self, method, { ... })
+                env.ACC_SpyBusy = false
+            end
+            return old(self, ...)
+        end
+        if type(newcclosure) == "function" then handler = newcclosure(handler) end
+        local ok, previous = pcall(function() return hookmetamethod(game, "__namecall", handler) end)
+        if not ok then
+            hookNote = "outgoing hook failed: " .. tostring(previous)
+            return false
+        end
+        old = previous
+        env.ACC_SpyHooked = true
+        hookNote = "outgoing hook active"
+        return true
+    end
+
+    buttons.Full.MouseButton1Click:Connect(function()
+        setStatus("Scanning remotes, modules, and GUI...")
+        task.spawn(function()
+            scanEntries = scanAll()
+            view = "scan"
+            render()
+            setStatus("Full scan complete: " .. tostring(#scanEntries) .. " entries")
+        end)
+    end)
     buttons.Clear.MouseButton1Click:Connect(function() scanEntries, liveEntries, selectedBody, detail.Text = {}, {}, "", "Cleared." render() end)
     buttons.Listen.MouseButton1Click:Connect(function()
         listening = not listening env.ACC_SpyOn = listening
         if listening then
-            local n = 0 pcall(function() n = bindAll() end)
+            local n = 0
+            pcall(function() n = bindAll() end)
+            pcall(installHook)
             buttons.Listen.Text, buttons.Listen.BackgroundColor3 = "Stop", C3(200, 40, 40)
-            view, hookNote = "live", "bound " .. tostring(n) render()
+            view = "live"
+            hookNote = hookNote .. " | incoming bound " .. tostring(n)
+            render()
         else buttons.Listen.Text, buttons.Listen.BackgroundColor3 = "Listen", C3(40, 40, 40) setStatus("Listener off.") end
     end)
     copyBtn.MouseButton1Click:Connect(function()
@@ -442,7 +646,17 @@ local function buildSpy(parent)
     end)
     parent:GetPropertyChangedSignal("Visible"):Connect(function() if parent.Visible then render() end end)
 end
-pcall(buildSpy, spyFrame)
+local spyBuilt, spyError = pcall(buildSpy, spyFrame)
+if not spyBuilt then
+    warn("[ACC] Spy tab failed: " .. tostring(spyError))
+    local spyErrorLabel = Instance.new("TextLabel", spyFrame)
+    spyErrorLabel.Size = U2(1, -20, 0, 60)
+    spyErrorLabel.Position = U2(0, 10, 0, 20)
+    spyErrorLabel.BackgroundTransparency = 1
+    spyErrorLabel.TextColor3 = C3(255, 140, 140)
+    spyErrorLabel.TextWrapped = true
+    spyErrorLabel.Text = "Spy failed to build:\n" .. tostring(spyError)
+end
 
 -- ==========================================
 -- 5. BACKGROUND MODULES (HUD, EVENT, FISH, GEMS)
@@ -521,21 +735,45 @@ aClaim.MouseButton1Click:Connect(function() setClaimState(not isClaim) if SaveSt
 local fPnl = Instance.new("Frame", fFrame) fPnl.Size, fPnl.Position, fPnl.BackgroundColor3, fPnl.BorderSizePixel = U2(1,-20,1,-20), U2(0,10,0,10), C3(30,30,30), 0
 local fDelInp = mkInp(fPnl, "Loop Delay (Seconds)", "3", 50, -120) fDelInp.FocusLost:Connect(function() if SaveConfig then SaveConfig() end end)
 local fTglBtn = Instance.new("TextButton", fPnl) fTglBtn.Size, fTglBtn.Position, fTglBtn.BackgroundColor3, fTglBtn.TextColor3, fTglBtn.Text, fTglBtn.Font, fTglBtn.TextSize, fTglBtn.BorderSizePixel = U2(0,240,0,40), U2(0.5,-120,0,120), C3(200,40,40), C3(255,255,255), "Stop Auto-Fish", F_GB, 14, 0
-local isFish, fEvt = true, RS:WaitForChild("Remotes"):WaitForChild("Fish")
-local function fishLoop() task.spawn(function() while isFish and mFrame:IsDescendantOf(game) do local d = tonumber(fDelInp.Text) or 3 fEvt:FireServer("CastRod", 0.9999) task.wait(1) if not isFish then break end fEvt:FireServer("FishCaught") task.wait(d) end end) end
-local function setFishState(state) isFish = state fTglBtn.Text, fTglBtn.BackgroundColor3 = isFish and "Stop Auto-Fish" or "Start Auto-Fish", isFish and C3(200,40,40) or C3(40,200,120) if isFish then fishLoop() end end
-fishLoop() fTglBtn.MouseButton1Click:Connect(function() setFishState(not isFish) if SaveState then SaveState() end end)
+local remotes = RS:FindFirstChild("Remotes")
+local function getRemote(name)
+    return remotes and remotes:FindFirstChild(name) or nil
+end
+
+local isFish, fEvt = false, getRemote("Fish")
+local function fishLoop()
+    if not fEvt then return end
+    task.spawn(function()
+        while isFish and mFrame:IsDescendantOf(game) do
+            local d = tonumber(fDelInp.Text) or 3
+            pcall(function() fEvt:FireServer("CastRod", 0.9999) end)
+            task.wait(1)
+            if not isFish then break end
+            pcall(function() fEvt:FireServer("FishCaught") end)
+            task.wait(d)
+        end
+    end)
+end
+local function setFishState(state)
+    isFish = state and fEvt ~= nil
+    fTglBtn.Text = fEvt and (isFish and "Stop Auto-Fish" or "Start Auto-Fish") or "ERR: Fish Remote Missing"
+    fTglBtn.BackgroundColor3 = isFish and C3(200,40,40) or C3(40,200,120)
+    if isFish then fishLoop() end
+end
+setFishState(false)
+fTglBtn.MouseButton1Click:Connect(function() setFishState(not isFish) if SaveState then SaveState() end end)
 
 local gPnl = Instance.new("Frame", gFrame) gPnl.Size, gPnl.Position, gPnl.BackgroundColor3, gPnl.BorderSizePixel = U2(1,-20,1,-20), U2(0,10,0,10), C3(30,30,30), 0
 local gmBtn = Instance.new("TextButton", gPnl) gmBtn.Size, gmBtn.Position, gmBtn.BackgroundColor3, gmBtn.TextColor3, gmBtn.Text, gmBtn.Font, gmBtn.TextSize, gmBtn.BorderSizePixel = U2(0,240,0,40), U2(0.5,-120,0,100), C3(40,200,120), C3(255,255,255), "Start Auto-Gems", F_GB, 14, 0
 local gmStat = Instance.new("TextLabel", gPnl) gmStat.Size, gmStat.Position, gmStat.BackgroundTransparency, gmStat.TextColor3, gmStat.Text, gmStat.Font, gmStat.TextSize = U2(0,240,0,30), U2(0.5,-120,0,160), 1, C3(200,200,200), "Status: Idle", F_GM, 12
-local isGems, GalEvt, CardEvt = false, RS:WaitForChild("Remotes"):WaitForChild("Gallery",3), RS:WaitForChild("Remotes"):WaitForChild("Card",3)
+local isGems, GalEvt, CardEvt = false, getRemote("Gallery"), getRemote("Card")
 local function setGemsState(state)
-    isGems = state gmBtn.Text, gmBtn.BackgroundColor3 = isGems and "Stop Auto-Gems" or "Start Auto-Gems", isGems and C3(200,40,40) or C3(40,200,120)
+    isGems = state and GalEvt ~= nil and CardEvt ~= nil
+    gmBtn.Text, gmBtn.BackgroundColor3 = (GalEvt and CardEvt) and (isGems and "Stop Auto-Gems" or "Start Auto-Gems") or "ERR: Gallery/Card Remote Missing", isGems and C3(200,40,40) or C3(40,200,120)
     if isGems then task.spawn(function()
         while isGems and mFrame:IsDescendantOf(game) do
-            for p=1,13 do if not isGems then break end gmStat.Text = "Sweeping Page "..p.."/13" for s=1,10 do GalEvt:FireServer("Collect", tostring(s)) end if p<13 then CardEvt:FireServer("Page", "RightArrowFigurine") task.wait(0.5) end end
-            for b=1,12 do CardEvt:FireServer("Page", "LeftArrowFigurine") task.wait(0.1) end
+            for p=1,13 do if not isGems then break end gmStat.Text = "Sweeping Page "..p.."/13" for s=1,10 do pcall(function() GalEvt:FireServer("Collect", tostring(s)) end) end if p<13 then pcall(function() CardEvt:FireServer("Page", "RightArrowFigurine") end) task.wait(0.5) end end
+            for b=1,12 do pcall(function() CardEvt:FireServer("Page", "LeftArrowFigurine") end) task.wait(0.1) end
             for w=20,1,-1 do if not isGems then break end gmStat.Text = "Waiting "..w.."s..." task.wait(1) end
         end gmStat.Text = "Status: Idle"
     end) end
@@ -550,7 +788,7 @@ for _, box in ipairs({hkDel, hnDel, hmUnits, hwDel, hzInp, hsInp}) do box.FocusL
 local htTPBtn = Instance.new("TextButton", hFrame) htTPBtn.Size, htTPBtn.Position, htTPBtn.BackgroundColor3, htTPBtn.TextColor3, htTPBtn.Text, htTPBtn.Font, htTPBtn.TextSize, htTPBtn.BorderSizePixel = U2(0,240,0,30), U2(0.5,-120,0,190), C3(40,200,120), C3(255,255,255), "[X] Smart Walk To Zones", F_GB, 12, 0
 local hBtn = Instance.new("TextButton", hFrame) hBtn.Size, hBtn.Position, hBtn.BackgroundColor3, hBtn.TextColor3, hBtn.Text, hBtn.Font, hBtn.TextSize, hBtn.BorderSizePixel = U2(0,240,0,40), U2(0.5,-120,0,230), C3(40,200,120), C3(255,255,255), "Start Halloween Battle", F_GB, 14, 0
 local hStat = Instance.new("TextLabel", hFrame) hStat.Size, hStat.Position, hStat.BackgroundTransparency, hStat.TextColor3, hStat.Text, hStat.Font, hStat.TextSize = U2(0,240,0,25), U2(0.5,-120,0,280), 1, C3(200,200,200), "Status: Idle", F_GM, 12
-local isHal, isTP, HalEvt = false, true, RS:WaitForChild("Remotes"):WaitForChild("Halloween", 3)
+local isHal, isTP, HalEvt = false, true, getRemote("Halloween")
 htTPBtn.MouseButton1Click:Connect(function() isTP = not isTP htTPBtn.Text, htTPBtn.BackgroundColor3 = isTP and "[X] Smart Walk To Zones" or "[ ] Smart Walk To Zones", isTP and C3(40,200,120) or C3(50,50,50) if SaveConfig then SaveConfig() end end)
 local function tweenTo(targetCFrame) local hrp = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart") if not hrp then return end local dist = (hrp.Position - targetCFrame.Position).Magnitude local tSpeed = math.max(1, tonumber(hsInp.Text) or 60) local tw = TS:Create(hrp, TweenInfo.new(dist / tSpeed, Enum.EasingStyle.Linear), {CFrame = targetCFrame}) tw:Play() tw.Completed:Wait() end
 local function setHalState(state)
@@ -697,7 +935,7 @@ local function bGrader(pFrame, sData, pcData, rName, aName, gList, gRanks)
     local isG, rEvt = false, nil
     local waitingRoll = false
     local rollGrade = nil
-    pcall(function() rEvt = RS:WaitForChild("Remotes"):WaitForChild(rName) end)
+    rEvt = getRemote(rName)
     
     if rEvt then rEvt.OnClientEvent:Connect(function(...)
         if not waitingRoll then return end
@@ -864,11 +1102,21 @@ local function bTraitRoller(pFrame, sData, pcData)
     local SData = {}
     local CardBtnMap = {}
 
+    local function towerSummary(cardName)
+        for _, collection in ipairs({ "TowerCards", "Cards" }) do
+            local record = getLiveRecord(collection, cardName)
+            if record then
+                return " | " .. tostring(record.Grade or "?") .. " | " .. tostring(record.Trait or "?")
+            end
+        end
+        return " | ? | ?"
+    end
+
     local function uncheckCard(packName, cardName)
         if SData[packName] and SData[packName].items[cardName] ~= nil then
             SData[packName].items[cardName] = false
             local btn = CardBtnMap[cardName]
-            if btn then btn.Text = "   ↳ [ ] " .. cardName btn.TextColor3 = C3(150, 150, 150) end
+            if btn then btn.Text = "   ↳ [ ] " .. cardName .. towerSummary(cardName) btn.TextColor3 = C3(150, 150, 150) end
             local anyLeft = false
             for _, v in pairs(SData[packName].items) do if v then anyLeft = true break end end
             SData[packName].isSelected = anyLeft
@@ -889,15 +1137,15 @@ local function bTraitRoller(pFrame, sData, pcData)
         Instance.new("UIListLayout", iF) local iBtns = {} SData[pN].cBtn = cBtn
         if pcData[pN] then for _, iN in ipairs(pcData[pN]) do
             SData[pN].items[iN] = false
-            local ib = Instance.new("TextButton", iF) ib.Size, ib.BackgroundColor3, ib.TextColor3, ib.Text, ib.Font, ib.TextSize, ib.TextXAlignment, ib.BorderSizePixel = U2(1,0,0,20), C3(20,20,20), C3(150,150,150), "   ↳ [ ] "..iN, F_GM, 11, Enum.TextXAlignment.Left, 0
+            local ib = Instance.new("TextButton", iF) ib.Size, ib.BackgroundColor3, ib.TextColor3, ib.Text, ib.Font, ib.TextSize, ib.TextXAlignment, ib.BorderSizePixel = U2(1,0,0,20), C3(20,20,20), C3(150,150,150), "   ↳ [ ] "..iN..towerSummary(iN), F_GM, 11, Enum.TextXAlignment.Left, 0
             CardBtnMap[iN] = ib
             ib.MouseButton1Click:Connect(function()
                 local s = not SData[pN].items[iN] SData[pN].items[iN] = s
-                ib.Text = "   ↳ "..(s and "[X] " or "[ ] ")..iN
+                ib.Text = "   ↳ "..(s and "[X] " or "[ ] ")..iN..towerSummary(iN)
                 ib.TextColor3 = s and C3(40,200,120) or C3(150, 150, 150)
                 if SaveState then SaveState() end
             end)
-            table.insert(iBtns, {btn=ib, name=iN, update = function(s) SData[pN].items[iN] = s ib.Text = "   ↳ "..(s and "[X] " or "[ ] ")..iN ib.TextColor3 = s and C3(40,200,120) or C3(150, 150, 150) end})
+            table.insert(iBtns, {btn=ib, name=iN, update = function(s) SData[pN].items[iN] = s ib.Text = "   ↳ "..(s and "[X] " or "[ ] ")..iN..towerSummary(iN) ib.TextColor3 = s and C3(40,200,120) or C3(150, 150, 150) end})
         end end
         eBtn.MouseButton1Click:Connect(function() iF.Visible = not iF.Visible eBtn.Text = iF.Visible and "-" or "+" end)
         local function updUI(s)
@@ -913,8 +1161,12 @@ local function bTraitRoller(pFrame, sData, pcData)
     local rPnl = Instance.new("Frame", pFrame) rPnl.Size, rPnl.Position, rPnl.BackgroundTransparency = U2(1,-250,1,-20), U2(0,250,0,10), 1
     local sLbl = Instance.new("TextLabel", rPnl) sLbl.Size, sLbl.BackgroundColor3, sLbl.TextColor3, sLbl.Text, sLbl.Font, sLbl.TextSize, sLbl.BorderSizePixel = U2(1,0,0,25), C3(20,20,20), C3(200,200,200), "Status: Idle", F_GM, 12, 0
     
-    local tInp = mkInp(rPnl, "Target Traits (comma separated)", "Fortune2, Fortune3", 50, 0)
-    tInp.FocusLost:Connect(function() if SaveConfig then SaveConfig() end end)
+    local towerTraits = {}
+    pcall(function()
+        local towerConfig = require(RS.Modules.Config.Core.TowerConfig)
+        for _, trait in ipairs(towerConfig.TraitList or {}) do towerTraits[#towerTraits + 1] = trait end
+    end)
+    local tInp = mkDropdown(rPnl, "Target Tower Trait", towerTraits, towerTraits[1], 50, 260)
     
     local anBtn = Instance.new("TextButton", rPnl) anBtn.Size, anBtn.Position, anBtn.BackgroundColor3, anBtn.TextColor3, anBtn.Text, anBtn.Font, anBtn.TextSize, anBtn.BorderSizePixel = U2(1,0,0,30), U2(0,0,0,110), C3(40,200,120), C3(255,255,255), "[X] Auto Next Item", F_GB, 13, 0
     local apBtn = Instance.new("TextButton", rPnl) apBtn.Size, apBtn.Position, apBtn.BackgroundColor3, apBtn.TextColor3, apBtn.Text, apBtn.Font, apBtn.TextSize, apBtn.BorderSizePixel = U2(1,0,0,30), U2(0,0,0,150), C3(40,200,120), C3(255,255,255), "[X] Auto Next Pack", F_GB, 13, 0
@@ -930,7 +1182,7 @@ local function bTraitRoller(pFrame, sData, pcData)
     local isT, rEvt = false, nil
     local waitingRoll = false
     local rollTrait = nil
-    pcall(function() rEvt = RS:WaitForChild("Remotes"):WaitForChild("Tower") end)
+    rEvt = getRemote("Tower")
     
     if rEvt then rEvt.OnClientEvent:Connect(function(action, trait, ...) 
         if action == "Roll" and isT and waitingRoll then
@@ -958,6 +1210,14 @@ local function bTraitRoller(pFrame, sData, pcData)
             local parsedTargets = {}
             for t in string.gmatch(tInp.Text, "[^,]+") do table.insert(parsedTargets, string.lower(stripTags(t))) end
             if #parsedTargets == 0 then isT = false stBtn.Text = "ERR: NO TARGETS" return end
+
+            local function matchesTrait(value)
+                local cleanValue = string.lower(stripTags(tostring(value or "")))
+                for _, target in ipairs(parsedTargets) do
+                    if string.find(cleanValue, target, 1, true) then return true end
+                end
+                return false
+            end
             
             local cIdx = 1
             isT, waitingRoll, rollTrait = true, false, nil
@@ -974,24 +1234,24 @@ local function bTraitRoller(pFrame, sData, pcData)
                         break 
                     end
                     
-                    sLbl.Text = "Rolling: " .. cT.Item
+                    local currentRecord = getLiveRecord("TowerCards", cT.Item) or getLiveRecord("Cards", cT.Item)
+                    local currentTrait = currentRecord and currentRecord.Trait
                     rollTrait = nil
-                    waitingRoll = true
-                    
-                    pcall(function() rEvt:FireServer("Roll", cT.Item) end)
-                    
                     local delaySec = (tonumber(dInp.Text) or 300) / 1000
                     local t0 = os.clock()
-                    
-                    while isT and waitingRoll and not rollTrait and (os.clock() - t0) < delaySec do task.wait(0.05) end
-                    waitingRoll = false
+                    if currentTrait and matchesTrait(currentTrait) then
+                        sLbl.Text = "Already met: " .. cT.Item
+                        rollTrait = currentTrait
+                    else
+                        sLbl.Text = "Rolling: " .. cT.Item
+                        waitingRoll = true
+                        pcall(function() rEvt:FireServer("Roll", cT.Item) end)
+                        while isT and waitingRoll and not rollTrait and (os.clock() - t0) < delaySec do task.wait(0.05) end
+                        waitingRoll = false
+                    end
                     
                     if rollTrait then
-                        local cleanT = string.lower(stripTags(tostring(rollTrait)))
-                        local matched = false
-                        for _, targ in ipairs(parsedTargets) do
-                            if string.find(cleanT, targ, 1, true) then matched = true break end
-                        end
+                        local matched = matchesTrait(rollTrait)
                         
                         if matched then
                             uncheckCard(cT.Pack, cT.Item)
@@ -1045,7 +1305,7 @@ local function bTraitRoller(pFrame, sData, pcData)
                 if s then anySelected = true end
                 local btn = CardBtnMap[iN]
                 if btn then
-                    btn.Text = "   ↳ " .. (s and "[X] " or "[ ] ") .. iN
+                    btn.Text = "   ↳ " .. (s and "[X] " or "[ ] ") .. iN .. towerSummary(iN)
                     btn.TextColor3 = s and C3(40, 200, 120) or C3(150, 150, 150)
                 end
             end
@@ -1062,7 +1322,192 @@ end
 bTraitRoller(tFrame, CardSortedPacks, CardPackCards)
 
 -- ==========================================
--- 8. SETTINGS TAB & AUTO-SYNC ENGINE
+-- 8. FIGURINE GRADE / TRAIT ROLLER
+-- ==========================================
+local FigurineAPI = {}
+
+local function buildFigurineGrader(parent)
+    local panel = Instance.new("Frame", parent)
+    panel.Size, panel.Position, panel.BackgroundColor3, panel.BorderSizePixel = U2(1, -20, 1, -20), U2(0, 10, 0, 10), C3(30, 30, 30), 0
+
+    local list = Instance.new("ScrollingFrame", panel)
+    list.Size, list.Position, list.BackgroundColor3, list.ScrollBarThickness, list.BorderSizePixel = U2(0, 300, 1, -20), U2(0, 10, 0, 10), C3(22, 22, 22), 6, 0
+    list.CanvasSize = U2(0, 0, 0, 0)
+    local layout = Instance.new("UIListLayout", list)
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Padding = UDim.new(0, 2)
+    layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        list.CanvasSize = U2(0, 0, 0, layout.AbsoluteContentSize.Y + 4)
+    end)
+
+    local controls = Instance.new("Frame", panel)
+    controls.Size, controls.Position, controls.BackgroundTransparency = U2(1, -320, 1, -20), U2(0, 310, 0, 10), 1
+    local status = Instance.new("TextLabel", controls)
+    status.Size, status.BackgroundColor3, status.TextColor3, status.Text, status.Font, status.TextSize = U2(1, 0, 0, 28), C3(20, 20, 20), C3(200, 200, 200), "Status: Idle", F_GM, 12
+
+    local modeBtn = Instance.new("TextButton", controls)
+    modeBtn.Size, modeBtn.Position, modeBtn.BackgroundColor3, modeBtn.TextColor3, modeBtn.Text, modeBtn.Font, modeBtn.TextSize = U2(1, 0, 0, 34), U2(0, 0, 0, 38), C3(40, 40, 120), C3(255, 255, 255), "Mode: Grade", F_GB, 13
+    local figurineGrades, figurineTraits = {}, {}
+    local okGalleryConfig, galleryConfig = pcall(function() return require(RS.Modules.Config.Core.GalleryConfig) end)
+    if okGalleryConfig and type(galleryConfig) == "table" then
+        for _, grade in ipairs(GRADE_LIST) do
+            if galleryConfig.Grades and galleryConfig.Grades[grade] then figurineGrades[#figurineGrades + 1] = grade end
+        end
+        for trait in pairs(galleryConfig.Traits or {}) do figurineTraits[#figurineTraits + 1] = trait end
+        table.sort(figurineTraits)
+    end
+    local gradeInp = mkDropdown(controls, "Target Figurine Grade", figurineGrades, "UR", 82, 260)
+    local traitInp = mkDropdown(controls, "Target Figurine Trait", figurineTraits, figurineTraits[1], 140, 260)
+    traitInp.Visible = false
+    local delayInp = mkInp(controls, "Delay (ms)", "300", 198, 0, 260)
+    local selectBtn = Instance.new("TextButton", controls)
+    selectBtn.Size, selectBtn.Position, selectBtn.BackgroundColor3, selectBtn.TextColor3, selectBtn.Text, selectBtn.Font, selectBtn.TextSize = U2(0.5, -4, 0, 32), U2(0, 0, 0, 258), C3(45, 45, 45), C3(255, 255, 255), "Select All", F_GM, 12
+    local clearBtn = selectBtn:Clone()
+    clearBtn.Position, clearBtn.Text, clearBtn.Parent = U2(0.5, 4, 0, 258), "Clear", controls
+    local runBtn = Instance.new("TextButton", controls)
+    runBtn.Size, runBtn.Position, runBtn.BackgroundColor3, runBtn.TextColor3, runBtn.Text, runBtn.Font, runBtn.TextSize = U2(1, 0, 0, 40), U2(0, 0, 0, 300), C3(40, 200, 120), C3(255, 255, 255), "Start Figurine Roller", F_GB, 14
+
+    local selected, buttons, names = {}, {}, {}
+    local mode, running, waiting, result, runId = "Grade", false, false, nil, 0
+    local gallery = getRemote("Gallery")
+
+    local function currentValue(name, key)
+        local liveRecord = getLiveRecord("Figurines", name)
+        if liveRecord and liveRecord[key] ~= nil then return tostring(liveRecord[key]) end
+        local pg = LP:FindFirstChild("PlayerGui")
+        local root = pg and pg:FindFirstChild("FigurineSelect")
+        local frame = root and root:FindFirstChild("Frame")
+        local main = frame and frame:FindFirstChild("Main")
+        local item = main and main:FindFirstChild(name)
+        local field = item and item:FindFirstChild(key, true)
+        if not field then return nil end
+        if field:IsA("TextLabel") or field:IsA("TextButton") or field:IsA("TextBox") then
+            return stripTags(field.Text)
+        end
+        local gradient = field:FindFirstChildOfClass("UIGradient")
+        return gradient and gradient.Name ~= "UIGradient" and gradient.Name or nil
+    end
+
+    local function paint(name)
+        local b = buttons[name]
+        if not b then return end
+        local grade = currentValue(name, "Grade") or "?"
+        local trait = currentValue(name, "Trait") or "?"
+        b.Text = (selected[name] and "[X] " or "[ ] ") .. name .. " | " .. grade .. " | " .. trait
+        b.TextColor3 = selected[name] and C3(40, 200, 120) or C3(210, 210, 210)
+    end
+
+    local function refresh()
+        for _, name in ipairs(names) do paint(name) end
+    end
+
+    if okGalleryConfig and type(galleryConfig) == "table" and type(galleryConfig.Figurines) == "table" then
+        for name in pairs(galleryConfig.Figurines) do names[#names + 1] = name end
+    end
+    table.sort(names)
+    for index, name in ipairs(names) do
+        local b = Instance.new("TextButton", list)
+        b.Size, b.BackgroundColor3, b.Font, b.TextSize, b.TextXAlignment, b.BorderSizePixel, b.LayoutOrder = U2(1, -8, 0, 24), C3(28, 28, 28), F_GM, 11, Enum.TextXAlignment.Left, 0, index
+        buttons[name] = b
+        b.MouseButton1Click:Connect(function()
+            selected[name] = not selected[name]
+            paint(name)
+        end)
+    end
+    refresh()
+
+    modeBtn.MouseButton1Click:Connect(function()
+        mode = mode == "Grade" and "Trait" or "Grade"
+        modeBtn.Text = "Mode: " .. mode
+        gradeInp.Visible, traitInp.Visible = mode == "Grade", mode == "Trait"
+    end)
+    selectBtn.MouseButton1Click:Connect(function()
+        for _, name in ipairs(names) do selected[name] = true end
+        refresh()
+    end)
+    clearBtn.MouseButton1Click:Connect(function()
+        for _, name in ipairs(names) do selected[name] = false end
+        refresh()
+    end)
+
+    if gallery then
+        gallery.OnClientEvent:Connect(function(action, value)
+            if waiting and ((mode == "Grade" and action == "RollGrade") or (mode == "Trait" and action == "RollTrait")) then
+                result = tostring(value)
+            end
+        end)
+    end
+
+    local function targetMet(value)
+        if mode == "Grade" then
+            local target = exactGrade(gradeInp.Text) or "UR"
+            return GRADE_RANK[exactGrade(value) or "F"] >= (GRADE_RANK[target] or GRADE_RANK.UR)
+        end
+        local lower = string.lower(tostring(value or ""))
+        for target in string.gmatch(traitInp.Text, "[^,]+") do
+            if string.find(lower, string.lower(stripTags(target)), 1, true) then return true end
+        end
+        return false
+    end
+
+    runBtn.MouseButton1Click:Connect(function()
+        if running then
+            running, runId, waiting = false, runId + 1, false
+            runBtn.Text, runBtn.BackgroundColor3 = "Start Figurine Roller", C3(40, 200, 120)
+            status.Text = "Stopped"
+            return
+        end
+        if not gallery then
+            status.Text = "Gallery remote missing"
+            return
+        end
+        local queue = {}
+        for _, name in ipairs(names) do if selected[name] then queue[#queue + 1] = name end end
+        if #queue == 0 then status.Text = "Select at least one figurine" return end
+        running, runId = true, runId + 1
+        local myRun, index = runId, 1
+        runBtn.Text, runBtn.BackgroundColor3 = "Stop Figurine Roller", C3(200, 40, 40)
+        task.spawn(function()
+            while running and runId == myRun do
+                local name = queue[index]
+                if not name then
+                    running = false
+                    status.Text = "Finished"
+                    runBtn.Text, runBtn.BackgroundColor3 = "Start Figurine Roller", C3(40, 200, 120)
+                    break
+                end
+                local current = currentValue(name, mode)
+                if targetMet(current) then
+                    index = index + 1
+                else
+                    status.Text = "Rolling " .. mode .. ": " .. name
+                    result, waiting = nil, true
+                    local action = mode == "Grade" and "RollGrade" or "RollTrait"
+                    pcall(function() gallery:FireServer(action, name) end)
+                    local delaySec, started = math.max(50, tonumber(delayInp.Text) or 300) / 1000, os.clock()
+                    while running and runId == myRun and waiting and not result and os.clock() - started < delaySec do task.wait(0.05) end
+                    waiting = false
+                    if result and targetMet(result) then index = index + 1 end
+                    local remaining = delaySec - (os.clock() - started)
+                    if remaining > 0 then task.wait(remaining) end
+                end
+                refresh()
+            end
+        end)
+    end)
+
+    task.spawn(function()
+        while parent:IsDescendantOf(game) do
+            refresh()
+            task.wait(1)
+        end
+    end)
+end
+
+buildFigurineGrader(figFrame)
+
+-- ==========================================
+-- 9. SETTINGS TAB & AUTO-SYNC ENGINE
 -- ==========================================
 local sPnl = Instance.new("Frame", sFrame)
 sPnl.Size, sPnl.Position, sPnl.BackgroundColor3, sPnl.BorderSizePixel = U2(1,-20,1,-20), U2(0,10,0,10), C3(30,30,30), 0
