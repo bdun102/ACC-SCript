@@ -92,6 +92,7 @@ end)
 local GRADE_ORDER = { "UR", "SR", "SS", "S+", "S", "A", "B", "C", "D", "E", "F" }
 local GRADE_LIST = { "F", "E", "D", "C", "B", "A", "S", "S+", "SS", "SR", "UR" }
 local GRADE_RANK = { F = 1, E = 2, D = 3, C = 4, B = 5, A = 6, S = 7, ["S+"] = 8, SS = 9, SR = 10, UR = 11 }
+local ROLL_TIMEOUT_SECONDS = 15
 
 local function stripTags(str)
     if str == nil then return "" end
@@ -140,16 +141,22 @@ local function exactGrade(v)
 end
 
 local liveDataModule
-local function getLiveRecord(collection, itemName)
+local function getLiveData(...)
+    local args = { ... }
     local ok, record = pcall(function()
         if not liveDataModule then
             local moduleScript = RF:FindFirstChild("ReplicatedData")
             if not moduleScript then return nil end
             liveDataModule = require(moduleScript)
         end
-        return liveDataModule.GetData(collection, itemName)
+        return liveDataModule.GetData(table.unpack(args))
     end)
-    return ok and type(record) == "table" and record or nil
+    return ok and record or nil
+end
+
+local function getLiveRecord(collection, itemName)
+    local record = getLiveData(collection, itemName)
+    return type(record) == "table" and record or nil
 end
 
 local CardSortedPacks, CardPackCards = {}, {}
@@ -364,10 +371,10 @@ local function mkTabBtn(name, pIdx, tot)
     return b
 end
 
-local nTabs = 10
+local nTabs = 12
 local tBtns = {
     mkTabBtn("Cards",1,nTabs), mkTabBtn("Tower",2,nTabs), mkTabBtn("Event",3,nTabs), mkTabBtn("Auto",4,nTabs), 
-    mkTabBtn("Figurines",5,nTabs), mkTabBtn("Fish",6,nTabs), mkTabBtn("Gems",7,nTabs), mkTabBtn("HUD",8,nTabs), mkTabBtn("Spy",9,nTabs), mkTabBtn("⚙",10,nTabs)
+    mkTabBtn("Figurines",5,nTabs), mkTabBtn("Raid",6,nTabs), mkTabBtn("Manga",7,nTabs), mkTabBtn("Fish",8,nTabs), mkTabBtn("Gems",9,nTabs), mkTabBtn("HUD",10,nTabs), mkTabBtn("Spy",11,nTabs), mkTabBtn("⚙",12,nTabs)
 }
 local tFrames = {}
 for i=1, nTabs do
@@ -382,7 +389,7 @@ for i, btn in ipairs(tBtns) do
         end
     end)
 end
-local cFrame, tFrame, hFrame, aFrame, figFrame, fFrame, gFrame, hudTabFrame, spyFrame, sFrame = unpack(tFrames)
+local cFrame, tFrame, hFrame, aFrame, figFrame, raidFrame, mangaFrame, fFrame, gFrame, hudTabFrame, spyFrame, sFrame = unpack(tFrames)
 
 local function mkInp(p, lblText, def, py, xOff, wid)
     wid = wid or 240
@@ -695,14 +702,28 @@ end
 hudTglBtn.MouseButton1Click:Connect(function() setHudState(not isHudEnabled) if SaveState then SaveState() end end)
 
 local function clickUIPath(pathStr)
-    pcall(function()
+    local ok, clicked = pcall(function()
         local parts = string.split(pathStr, ".") local current = game
         for _, p in ipairs(parts) do
             if p == "Players" then current = game.Players elseif p == "LocalPlayer" then current = LP else current = current:FindFirstChild(p) end
             if not current then return false end
         end
-        if current and current:IsA("GuiButton") and firesignal then firesignal(current.MouseButton1Click) end
+        if not current or not current:IsA("GuiButton") then return false end
+        if type(firesignal) == "function" then
+            firesignal(current.MouseButton1Click)
+            return true
+        end
+        if type(getconnections) == "function" then
+            for _, connection in ipairs(getconnections(current.MouseButton1Click)) do
+                if type(connection.Function) == "function" then
+                    pcall(connection.Function)
+                    return true
+                end
+            end
+        end
+        return false
     end)
+    return ok and clicked == true
 end
 
 local isSmelt, isPotion, isClaim = false, false, false
@@ -739,6 +760,284 @@ local remotes = RS:FindFirstChild("Remotes")
 local function getRemote(name)
     return remotes and remotes:FindFirstChild(name) or nil
 end
+
+local RaidConfig, CardConfig
+pcall(function() RaidConfig = require(RS.Modules.Config.Core.RaidConfig) end)
+pcall(function() CardConfig = require(RS.Modules.Config.Core.CardConfig) end)
+
+local raidPanel = Instance.new("Frame", raidFrame)
+raidPanel.Size, raidPanel.Position, raidPanel.BackgroundColor3, raidPanel.BorderSizePixel = U2(1, -20, 1, -20), U2(0, 10, 0, 10), C3(30, 30, 30), 0
+local raidPacks = RaidConfig and RaidConfig.ActiveRaids or {}
+local raidStatus = Instance.new("TextLabel", raidPanel)
+raidStatus.Size, raidStatus.Position, raidStatus.BackgroundColor3, raidStatus.TextColor3, raidStatus.Text, raidStatus.Font, raidStatus.TextSize = U2(1, -20, 0, 28), U2(0, 10, 0, 12), C3(20, 20, 20), C3(200, 200, 200), "Status: Idle", F_GM, 12
+local raidBtn = Instance.new("TextButton", raidPanel)
+raidBtn.Size, raidBtn.Position, raidBtn.BackgroundColor3, raidBtn.TextColor3, raidBtn.Text, raidBtn.Font, raidBtn.TextSize = U2(0, 260, 0, 40), U2(0.5, -130, 0, 190), C3(40, 200, 120), C3(255, 255, 255), "Start Auto-Raid", F_GB, 14
+local raidPackList = Instance.new("ScrollingFrame", raidPanel)
+raidPackList.Size, raidPackList.Position, raidPackList.BackgroundColor3, raidPackList.BorderSizePixel, raidPackList.ScrollBarThickness = U2(1, -20, 1, -250), U2(0, 10, 0, 240), C3(22, 22, 22), 0, 6
+raidPackList.CanvasSize = U2(0, 0, 0, #raidPacks * 34)
+local raidPackLayout = Instance.new("UIListLayout", raidPackList)
+raidPackLayout.SortOrder = Enum.SortOrder.LayoutOrder
+local raidSelectedPacks, raidPackButtons = {}, {}
+
+local function raidProgress(packName)
+    return math.max(0, tonumber(getLiveData("RaidsDefeated", "Packs", packName)) or 0)
+end
+
+local function refreshRaidPackRows()
+    for _, packName in ipairs(raidPacks) do
+        local button = raidPackButtons[packName]
+        if button then
+            local count = raidProgress(packName)
+            button.Text = (raidSelectedPacks[packName] and "[X] " or "[ ] ") .. packName .. "  " .. tostring(math.min(count, 9)) .. "/9"
+            button.TextColor3 = count >= 9 and C3(150, 150, 150) or (raidSelectedPacks[packName] and C3(40, 220, 130) or C3(210, 210, 210))
+        end
+    end
+end
+
+for index, packName in ipairs(raidPacks) do
+    local packBtn = Instance.new("TextButton", raidPackList)
+    packBtn.Size, packBtn.LayoutOrder, packBtn.BackgroundColor3, packBtn.TextColor3, packBtn.Text, packBtn.Font, packBtn.TextSize, packBtn.BorderSizePixel = U2(1, -8, 0, 32), index, C3(35, 35, 35), C3(210, 210, 210), "[ ] " .. packName .. "  0/9", F_GM, 12, 0
+    raidPackButtons[packName] = packBtn
+    packBtn.MouseButton1Click:Connect(function()
+        if raidProgress(packName) >= 9 then return end
+        raidSelectedPacks[packName] = not raidSelectedPacks[packName]
+        refreshRaidPackRows()
+    end)
+end
+local raidRunning, raidRun = false, 0
+
+local function getRaidQueue()
+    local queue = {}
+    for _, packName in ipairs(raidPacks) do
+        if raidSelectedPacks[packName] then queue[#queue + 1] = packName end
+    end
+    return queue
+end
+
+local mutationRank = { Regular = 1, Gold = 2, Emerald = 3, Void = 4, Diamond = 5, Rainbow = 6 }
+local function getBestRaidTeam(packName)
+    local team = {}
+    local candidates = {}
+    local packData = CardConfig and CardConfig.Packs and CardConfig.Packs[packName]
+    if not packData or type(packData.List) ~= "table" then return team end
+    for cardName in pairs(packData.List) do
+        local record = getLiveRecord("Cards", cardName)
+        if record then
+            candidates[#candidates + 1] = {
+                name = cardName,
+                grade = GRADE_RANK[exactGrade(record.Grade) or "F"] or 0,
+                level = tonumber(record.Level) or 0,
+                star = tonumber(record.Star) or 0,
+                mutation = mutationRank[record.Mutation or "Regular"] or 1,
+                power = tonumber(record.Damage or record.DPS or record.Power) or 0,
+            }
+        end
+    end
+    table.sort(candidates, function(a, b)
+        if a.power ~= b.power then return a.power > b.power end
+        if a.grade ~= b.grade then return a.grade > b.grade end
+        if a.level ~= b.level then return a.level > b.level end
+        if a.star ~= b.star then return a.star > b.star end
+        return a.mutation > b.mutation
+    end)
+    for index = 1, math.min(3, #candidates) do
+        team[index] = candidates[index].name
+    end
+    return team
+end
+
+refreshRaidPackRows()
+task.spawn(function()
+    while raidPanel:IsDescendantOf(game) do
+        refreshRaidPackRows()
+        task.wait(2)
+    end
+end)
+
+local function setRaidState(state)
+    raidRunning, raidRun = state, raidRun + 1
+    local myRun = raidRun
+    raidBtn.Text, raidBtn.BackgroundColor3 = raidRunning and "Stop Auto-Raid" or "Start Auto-Raid", raidRunning and C3(200, 40, 40) or C3(40, 200, 120)
+    if not raidRunning then
+        raidStatus.Text = "Status: Idle"
+        return
+    end
+    local raidRemote = getRemote("Raid")
+    if not raidRemote then
+        raidRunning = false
+        raidBtn.Text = "Raid remote missing"
+        return
+    end
+    local queue = getRaidQueue()
+    if #queue == 0 then
+        raidRunning = false
+        raidBtn.Text = "Select a raid pack"
+        return
+    end
+    task.spawn(function()
+        -- One raid clear is not the end of the queue. Stay up, re-read the live
+        -- vote/raid clock, and keep the first selected pack that is still under 9/9.
+        local joinedKey, joinedPack, progressAtJoin = nil, nil, nil
+        local fallbackKey, fallbackStart = nil, nil
+        while raidRunning and raidRun == myRun and mFrame:IsDescendantOf(game) do
+            refreshRaidPackRows()
+
+            local packName = nil
+            for _, name in ipairs(raidPacks) do
+                if raidSelectedPacks[name] and raidProgress(name) < 9 then
+                    packName = name
+                    break
+                end
+            end
+            if not packName then
+                raidRunning = false
+                raidStatus.Text = "Status: All selected raids are 9/9"
+                raidBtn.Text, raidBtn.BackgroundColor3 = "Start Auto-Raid", C3(40, 200, 120)
+                break
+            end
+
+            local now = workspace:GetServerTimeNow()
+            local voteAttr = workspace:GetAttribute("RaidVoteTime")
+            local voteTime = tonumber(voteAttr)
+            local activePack = workspace:GetAttribute("RaidPack")
+            local raidStart = tonumber(workspace:GetAttribute("RaidStart"))
+            local raidDuration = (RaidConfig and RaidConfig.RaidDuration or 460) + (RaidConfig and RaidConfig.GracePeriod or 10)
+            local progress = raidProgress(packName)
+
+            -- RaidStart is normally a server start timestamp. If it is missing, keep our own
+            -- clock from the moment this pack became active so the countdown still shows.
+            if activePack ~= nil and raidStart == nil then
+                local key = tostring(activePack)
+                if fallbackKey ~= key or fallbackStart == nil then
+                    fallbackKey = key
+                    fallbackStart = now
+                end
+                raidStart = fallbackStart
+            else
+                fallbackKey, fallbackStart = nil, nil
+            end
+
+            local cycleKey = raidStart and (tostring(activePack) .. ":" .. tostring(raidStart)) or nil
+            local raidLeft = nil
+            if raidStart then
+                local fromStart = (raidStart + raidDuration) - now
+                if fromStart > 0 and fromStart <= raidDuration + 30 then
+                    raidLeft = fromStart
+                elseif raidStart > now and (raidStart - now) <= raidDuration + 5 then
+                    raidLeft = raidStart - now
+                elseif raidStart >= 0 and raidStart <= raidDuration + 5 then
+                    raidLeft = raidStart
+                else
+                    raidLeft = fromStart
+                end
+            end
+            local raidGoing = activePack ~= nil and raidLeft ~= nil and raidLeft > 0
+            local finishedThisCycle = joinedKey ~= nil and cycleKey == joinedKey and joinedPack == packName and progressAtJoin ~= nil and progress > progressAtJoin
+
+            if raidGoing and not finishedThisCycle then
+                local remaining = math.max(0, math.ceil(raidLeft))
+                if tostring(activePack) == tostring(packName) then
+                    if joinedKey ~= cycleKey then
+                        local team = getBestRaidTeam(packName)
+                        if #team == 0 then
+                            raidStatus.Text = "No owned cards for " .. packName .. " (" .. tostring(remaining) .. "s)"
+                            task.wait(2)
+                        else
+                            raidStatus.Text = "Joining " .. packName .. ": " .. table.concat(team, ", ")
+                            local okJoin, joinError = pcall(function() raidRemote:FireServer("Join", team) end)
+                            if okJoin then
+                                joinedKey = cycleKey
+                                joinedPack = packName
+                                progressAtJoin = progress
+                                raidStatus.Text = "Raid active: " .. packName .. " (" .. tostring(remaining) .. "s) " .. tostring(progress) .. "/9"
+                            else
+                                raidStatus.Text = "Raid join failed: " .. tostring(joinError)
+                            end
+                            task.wait(0.5)
+                        end
+                    else
+                        raidStatus.Text = "Raid active: " .. packName .. " (" .. tostring(remaining) .. "s) " .. tostring(progress) .. "/9"
+                        task.wait(0.5)
+                    end
+                else
+                    raidStatus.Text = "Raid timer: " .. tostring(activePack) .. " (" .. tostring(remaining) .. "s). Next " .. packName .. " " .. tostring(progress) .. "/9"
+                    task.wait(0.5)
+                end
+            elseif voteTime ~= nil then
+                local voteRemaining = math.ceil(math.max(60 - (now - voteTime), 0))
+                raidStatus.Text = "Voting for " .. packName .. " (" .. tostring(progress) .. "/9, " .. tostring(voteRemaining) .. "s)"
+                pcall(function() raidRemote:FireServer("Vote", packName) end)
+                task.wait(0.5)
+            else
+                -- Cycle is over. Keep the button on and wait for the next vote/raid clock.
+                -- Only forget the join once this pack is no longer the active raid.
+                if activePack == nil or tostring(activePack) ~= tostring(joinedPack) then
+                    joinedKey, joinedPack, progressAtJoin = nil, nil, nil
+                end
+                if joinedKey ~= nil then
+                    local remaining = raidLeft and math.max(0, math.ceil(raidLeft)) or 0
+                    raidStatus.Text = "Raid complete. " .. packName .. " " .. tostring(progress) .. "/9. Timer: " .. tostring(remaining) .. "s"
+                else
+                    raidStatus.Text = "Waiting for raid timer. Next: " .. packName .. " " .. tostring(progress) .. "/9"
+                end
+                task.wait(0.5)
+            end
+        end
+    end)
+end
+raidBtn.MouseButton1Click:Connect(function() setRaidState(not raidRunning) end)
+
+local mangaPanel = Instance.new("Frame", mangaFrame)
+mangaPanel.Size, mangaPanel.Position, mangaPanel.BackgroundColor3, mangaPanel.BorderSizePixel = U2(1, -20, 1, -20), U2(0, 10, 0, 10), C3(30, 30, 30), 0
+local mangaStatus = Instance.new("TextLabel", mangaPanel)
+mangaStatus.Size, mangaStatus.Position, mangaStatus.BackgroundColor3, mangaStatus.TextColor3, mangaStatus.Text, mangaStatus.Font, mangaStatus.TextSize = U2(1, -20, 0, 42), U2(0, 10, 0, 12), C3(20, 20, 20), C3(200, 200, 200), "Requires SS+, level 30, Rainbow", F_GM, 12
+local mangaBtn = Instance.new("TextButton", mangaPanel)
+mangaBtn.Size, mangaBtn.Position, mangaBtn.BackgroundColor3, mangaBtn.TextColor3, mangaBtn.Text, mangaBtn.Font, mangaBtn.TextSize = U2(0, 260, 0, 40), U2(0.5, -130, 0, 80), C3(40, 200, 120), C3(255, 255, 255), "Start Auto-Manga", F_GB, 14
+local mangaRunning, mangaRun = false, 0
+
+local function setMangaState(state)
+    mangaRunning, mangaRun = state, mangaRun + 1
+    local myRun = mangaRun
+    mangaBtn.Text, mangaBtn.BackgroundColor3 = mangaRunning and "Stop Auto-Manga" or "Start Auto-Manga", mangaRunning and C3(200, 40, 40) or C3(40, 200, 120)
+    if not mangaRunning then
+        mangaStatus.Text = "Status: Idle"
+        return
+    end
+    local raidRemote = getRemote("Raid")
+    if not raidRemote or not CardConfig then
+        mangaRunning = false
+        mangaBtn.Text = "Manga data unavailable"
+        return
+    end
+    task.spawn(function()
+        while mangaRunning and mangaRun == myRun and mFrame:IsDescendantOf(game) do
+            local tokens = tonumber(getLiveData("MangaTokens")) or 0
+            local upgraded = 0
+            for packName, packData in pairs(CardConfig.Packs or {}) do
+                if not mangaRunning or mangaRun ~= myRun then break end
+                if type(packData) == "table" and type(packData.List) == "table" then
+                    local raids = tonumber(getLiveData("RaidsDefeated", "Packs", packName)) or 0
+                    for cardName, cardInfo in pairs(packData.List) do
+                        local record = getLiveRecord("Cards", cardName)
+                        local level = record and tonumber(record.Level) or 0
+                        local grade = record and exactGrade(record.Grade)
+                        local cost = math.round((tonumber(cardInfo.Layout) or 0) * 5)
+                        if record and record.Manga ~= true and level >= (RaidConfig and RaidConfig.LevelRequirement or 30) and grade and (GRADE_RANK[grade] or 0) >= (GRADE_RANK.SS or 9) and record.Mutation == "Rainbow" and raids >= (tonumber(cardInfo.Layout) or math.huge) and tokens >= cost then
+                            mangaStatus.Text = "Upgrading " .. cardName .. " (" .. packName .. ")"
+                            pcall(function() raidRemote:FireServer("Manga", cardName) end)
+                            upgraded = upgraded + 1
+                            task.wait(1)
+                            tokens = tonumber(getLiveData("MangaTokens")) or math.max(0, tokens - cost)
+                        end
+                    end
+                end
+            end
+            mangaStatus.Text = upgraded > 0 and ("Upgraded " .. upgraded .. " card(s)") or "No eligible cards found"
+            task.wait(5)
+        end
+    end)
+end
+mangaBtn.MouseButton1Click:Connect(function() setMangaState(not mangaRunning) end)
 
 local isFish, fEvt = false, getRemote("Fish")
 local function fishLoop()
@@ -1017,11 +1316,20 @@ local function bGrader(pFrame, sData, pcData, rName, aName, gList, gRanks)
                         local delaySec = (tonumber(dInp.Text) or 300) / 1000
                         local t0 = os.clock()
                         
-                        while isG and waitingRoll and not rollGrade and (os.clock() - t0) < delaySec do task.wait(0.05) end
+                        while isG and waitingRoll and not rollGrade and (os.clock() - t0) < ROLL_TIMEOUT_SECONDS do task.wait(0.05) end
                         waitingRoll = false
                         
                         local finalGrade = rollGrade or findGradeInUI(cT.Item)
-                        if finalGrade and gRanks[finalGrade] and gRanks[finalGrade] >= targetRank then
+                        local timedOut = not rollGrade and not finalGrade and (os.clock() - t0) >= ROLL_TIMEOUT_SECONDS
+                        if timedOut then
+                            sLbl.Text = "Timed out: " .. cT.Item
+                            if anC then
+                                cIdx = cIdx + 1
+                            else
+                                isG = false
+                                sgBtn.Text, sgBtn.BackgroundColor3 = "Start Grader", C3(40,200,120)
+                            end
+                        elseif finalGrade and gRanks[finalGrade] and gRanks[finalGrade] >= targetRank then
                             uncheckCard(cT.Pack, cT.Item)
                             if anC then
                                 cIdx = cIdx + 1
@@ -1246,7 +1554,7 @@ local function bTraitRoller(pFrame, sData, pcData)
                         sLbl.Text = "Rolling: " .. cT.Item
                         waitingRoll = true
                         pcall(function() rEvt:FireServer("Roll", cT.Item) end)
-                        while isT and waitingRoll and not rollTrait and (os.clock() - t0) < delaySec do task.wait(0.05) end
+                        while isT and waitingRoll and not rollTrait and (os.clock() - t0) < ROLL_TIMEOUT_SECONDS do task.wait(0.05) end
                         waitingRoll = false
                     end
                     
@@ -1266,11 +1574,31 @@ local function bTraitRoller(pFrame, sData, pcData)
                             task.wait(0.2)
                         else
                             local elapsed = os.clock() - t0
-                            if elapsed < delaySec then task.wait(delaySec - elapsed) end
+                            if elapsed >= ROLL_TIMEOUT_SECONDS then
+                                sLbl.Text = "Timed out: " .. cT.Item
+                                if anC then
+                                    cIdx = cIdx + 1
+                                else
+                                    isT = false
+                                    stBtn.Text, stBtn.BackgroundColor3 = "Start Roller", C3(40,200,120)
+                                end
+                            elseif elapsed < delaySec then
+                                task.wait(delaySec - elapsed)
+                            end
                         end
                     else
                         local elapsed = os.clock() - t0
-                        if elapsed < delaySec then task.wait(delaySec - elapsed) end
+                        if elapsed >= ROLL_TIMEOUT_SECONDS then
+                            sLbl.Text = "Timed out: " .. cT.Item
+                            if anC then
+                                cIdx = cIdx + 1
+                            else
+                                isT = false
+                                stBtn.Text, stBtn.BackgroundColor3 = "Start Roller", C3(40,200,120)
+                            end
+                        elseif elapsed < delaySec then
+                            task.wait(delaySec - elapsed)
+                        end
                     end
                 end 
             end) 
@@ -1462,7 +1790,11 @@ local function buildFigurineGrader(parent)
             return
         end
         local queue = {}
-        for _, name in ipairs(names) do if selected[name] then queue[#queue + 1] = name end end
+        for _, name in ipairs(names) do
+            if selected[name] and getLiveRecord("Figurines", name) then
+                queue[#queue + 1] = name
+            end
+        end
         if #queue == 0 then status.Text = "Select at least one figurine" return end
         running, runId = true, runId + 1
         local myRun, index = runId, 1
@@ -1476,20 +1808,32 @@ local function buildFigurineGrader(parent)
                     runBtn.Text, runBtn.BackgroundColor3 = "Start Figurine Roller", C3(40, 200, 120)
                     break
                 end
-                local current = currentValue(name, mode)
-                if targetMet(current) then
+                local ownedRecord = getLiveRecord("Figurines", name)
+                if not ownedRecord then
+                    status.Text = "Skipping unowned: " .. name
                     index = index + 1
                 else
-                    status.Text = "Rolling " .. mode .. ": " .. name
-                    result, waiting = nil, true
-                    local action = mode == "Grade" and "RollGrade" or "RollTrait"
-                    pcall(function() gallery:FireServer(action, name) end)
-                    local delaySec, started = math.max(50, tonumber(delayInp.Text) or 300) / 1000, os.clock()
-                    while running and runId == myRun and waiting and not result and os.clock() - started < delaySec do task.wait(0.05) end
-                    waiting = false
-                    if result and targetMet(result) then index = index + 1 end
-                    local remaining = delaySec - (os.clock() - started)
-                    if remaining > 0 then task.wait(remaining) end
+                    local current = currentValue(name, mode)
+                    if targetMet(current) then
+                        index = index + 1
+                    else
+                        status.Text = "Rolling " .. mode .. ": " .. name
+                        result, waiting = nil, true
+                        local action = mode == "Grade" and "RollGrade" or "RollTrait"
+                        pcall(function() gallery:FireServer(action, name) end)
+                        local delaySec, started = math.max(50, tonumber(delayInp.Text) or 300) / 1000, os.clock()
+                        while running and runId == myRun and waiting and not result and os.clock() - started < ROLL_TIMEOUT_SECONDS do task.wait(0.05) end
+                        local timedOut = not result and os.clock() - started >= ROLL_TIMEOUT_SECONDS
+                        waiting = false
+                        if timedOut then
+                            status.Text = "Timed out: " .. name
+                            index = index + 1
+                        elseif result and targetMet(result) then
+                            index = index + 1
+                        end
+                        local remaining = delaySec - (os.clock() - started)
+                        if remaining > 0 then task.wait(remaining) end
+                    end
                 end
                 refresh()
             end
