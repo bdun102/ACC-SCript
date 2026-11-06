@@ -11,7 +11,7 @@ pcall(function()
 end)
 
 local SCRIPT_URL = ""
-local LOAD_EXTERNAL_HUBS = false
+local LOAD_EXTERNAL_HUBS = true
 if not game:IsLoaded() then game.Loaded:Wait() end
 
 local Players = game:GetService("Players")
