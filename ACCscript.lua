@@ -1,5 +1,5 @@
 -- =========================================================================
--- ACC MASTER SUITE: STRICT UI ISOLATION, CASH GRADER, LUNAS3VEN & QYRIX
+-- ACC MASTER SUITE: 10-TAB STREAMLINED EDITION (UPGRADED OPENER & GRADER)
 -- =========================================================================
 
 pcall(function()
@@ -20,7 +20,6 @@ local UIS = game:GetService("UserInputService")
 local RS = game:GetService("ReplicatedStorage")
 local RF = game:GetService("ReplicatedFirst")
 local HS = game:GetService("HttpService")
-local TS = game:GetService("TweenService")
 local VU = game:GetService("VirtualUser")
 local VIM = game:GetService("VirtualInputManager")
 local U2 = UDim2.new
@@ -125,11 +124,6 @@ local function parseGrade(text)
     return nil
 end
 
-local function gradeFromValue(v)
-    if type(v) == "table" then return parseGrade(v.Grade or v.grade or v.Rarity or v.Result or v.Tier) end
-    return parseGrade(v)
-end
-
 local function exactGrade(v)
     if type(v) == "table" then return exactGrade(v.Grade or v.grade or v.Rarity or v.Result or v.Tier) end
     if v == nil then return nil end
@@ -217,7 +211,7 @@ pcall(function()
 end)
 
 -- ==========================================
--- 2. STRICT DIRECT UI LOOKUP (NO CACHE/HEURISTICS)
+-- 2. STRICT DIRECT UI LOOKUP
 -- ==========================================
 local function findGradeInUI(iName)
     if not iName then return nil end
@@ -286,9 +280,9 @@ local function findGradeInUI(iName)
 end
 
 -- ==========================================
--- 3. MASTER UI SETUP
+-- 3. MASTER UI SETUP (10 TABS)
 -- ==========================================
-local AllItemButtons = {}
+local AllItemButtons, AllOpenerButtons = {}, {}
 local SaveConfig, SaveState 
 
 local sharedEnv = (type(getgenv) == "function" and getgenv()) or _G
@@ -330,6 +324,7 @@ sqBtn.Text, sqBtn.Font, sqBtn.TextSize, sqBtn.Visible, sqBtn.Active, sqBtn.Dragg
 Instance.new("UICorner", sqBtn).CornerRadius = UDim.new(0, 8)
 
 local mFrame = Instance.new("Frame", sg)
+mFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 mFrame.Size, mFrame.Position, mFrame.BackgroundColor3, mFrame.BorderSizePixel = U2(0.94, 0, 0.88, 0), U2(0.5, 0, 0.5, 0), C3(35, 35, 35), 0
 mFrame.Active, mFrame.Draggable, mFrame.ClipsDescendants = true, true, true
 local frameConstraint = Instance.new("UISizeConstraint", mFrame)
@@ -365,16 +360,17 @@ tabC.AutomaticCanvasSize = Enum.AutomaticSize.X
 local tabLayout = Instance.new("UIListLayout", tabC)
 tabLayout.FillDirection, tabLayout.SortOrder, tabLayout.Padding = Enum.FillDirection.Horizontal, Enum.SortOrder.LayoutOrder, UDim.new(0, 2)
 
-local function mkTabBtn(name, pIdx, tot)
+local function mkTabBtn(name, pIdx)
     local b = Instance.new("TextButton", tabC) b.Size, b.LayoutOrder, b.Text, b.Font, b.TextSize, b.BorderSizePixel = U2(0, 94, 1, 0), pIdx, name, F_GB, 12, 0
     b.BackgroundColor3, b.TextColor3 = pIdx==1 and C3(45,45,45) or C3(35,35,35), pIdx==1 and C3(255,255,255) or C3(150,150,150)
     return b
 end
 
-local nTabs = 12
+local nTabs = 10
 local tBtns = {
-    mkTabBtn("Cards",1,nTabs), mkTabBtn("Tower",2,nTabs), mkTabBtn("Event",3,nTabs), mkTabBtn("Auto",4,nTabs), 
-    mkTabBtn("Figurines",5,nTabs), mkTabBtn("Raid",6,nTabs), mkTabBtn("Manga",7,nTabs), mkTabBtn("Fish",8,nTabs), mkTabBtn("Gems",9,nTabs), mkTabBtn("HUD",10,nTabs), mkTabBtn("Spy",11,nTabs), mkTabBtn("⚙",12,nTabs)
+    mkTabBtn("Cards",1), mkTabBtn("Tower",2), mkTabBtn("Opener",3),
+    mkTabBtn("Figurines",4), mkTabBtn("Raid",5), mkTabBtn("Fish",6),
+    mkTabBtn("Gems",7), mkTabBtn("HUD",8), mkTabBtn("Spy",9), mkTabBtn("⚙",10)
 }
 local tFrames = {}
 for i=1, nTabs do
@@ -389,12 +385,19 @@ for i, btn in ipairs(tBtns) do
         end
     end)
 end
-local cFrame, tFrame, hFrame, aFrame, figFrame, raidFrame, mangaFrame, fFrame, gFrame, hudTabFrame, spyFrame, sFrame = unpack(tFrames)
+local cFrame, tFrame, oFrame, figFrame, raidFrame, fFrame, gFrame, hudTabFrame, spyFrame, sFrame = unpack(tFrames)
 
 local function mkInp(p, lblText, def, py, xOff, wid)
     wid = wid or 240
     local l = Instance.new("TextLabel", p) l.Size, l.Position, l.BackgroundTransparency, l.TextColor3, l.Text, l.Font, l.TextSize, l.TextXAlignment = U2(0,wid,0,20), U2(0.5,xOff,0,py), 1, C3(200,200,200), lblText, F_GB, 12, Enum.TextXAlignment.Left
     local b = Instance.new("TextBox", p) b.Size, b.Position, b.BackgroundColor3, b.TextColor3, b.Text, b.Font, b.TextSize, b.BorderSizePixel = U2(0,wid,0,36), U2(0.5,xOff,0,py+20), C3(15,15,15), C3(255,255,255), def, F_GM, 14, 0
+    return b
+end
+
+local function mkFullInp(p, lblText, def, py, h)
+    h = h or 30
+    local l = Instance.new("TextLabel", p) l.Size, l.Position, l.BackgroundTransparency, l.TextColor3, l.Text, l.Font, l.TextSize, l.TextXAlignment = U2(1,0,0,20), U2(0,0,0,py), 1, C3(200,200,200), lblText, F_GB, 12, Enum.TextXAlignment.Left
+    local b = Instance.new("TextBox", p) b.Size, b.Position, b.BackgroundColor3, b.TextColor3, b.Text, b.Font, b.TextSize, b.BorderSizePixel = U2(1,0,0,h), U2(0,0,0,py+20), C3(15,15,15), C3(255,255,255), def, F_GM, 14, 0
     return b
 end
 
@@ -447,6 +450,14 @@ local function buildSpy(parent)
 
     local detail = Instance.new("TextBox", parent) detail.Size, detail.Position, detail.BackgroundColor3, detail.TextColor3, detail.Font, detail.TextSize = U2(1, -12, 0, 92), U2(0, 6, 1, -98), C3(12, 12, 12), C3(220, 220, 220), F_GM, 12
     detail.TextXAlignment, detail.TextYAlignment, detail.TextWrapped, detail.ClearTextOnFocus, detail.TextEditable, detail.MultiLine, detail.BorderSizePixel, detail.Text = Enum.TextXAlignment.Left, Enum.TextYAlignment.Top, true, false, false, true, 0, "Nothing selected."
+
+    local labels = { "Full", "Listen", "Clear" }
+    local buttons = {}
+    for i, name in ipairs(labels) do
+        local b = Instance.new("TextButton", bar)
+        b.Size, b.Position, b.BackgroundColor3, b.TextColor3, b.Text, b.Font, b.TextSize, b.BorderSizePixel = U2(1 / #labels, -2, 1, 0), U2((i - 1) / #labels, 0, 0, 0), C3(40, 40, 40), C3(255, 255, 255), name, F_GB, 11, 0
+        buttons[name] = b
+    end
 
     local function setStatus(txt) status.Text = txt end
     local function render()
@@ -656,17 +667,10 @@ end
 local spyBuilt, spyError = pcall(buildSpy, spyFrame)
 if not spyBuilt then
     warn("[ACC] Spy tab failed: " .. tostring(spyError))
-    local spyErrorLabel = Instance.new("TextLabel", spyFrame)
-    spyErrorLabel.Size = U2(1, -20, 0, 60)
-    spyErrorLabel.Position = U2(0, 10, 0, 20)
-    spyErrorLabel.BackgroundTransparency = 1
-    spyErrorLabel.TextColor3 = C3(255, 140, 140)
-    spyErrorLabel.TextWrapped = true
-    spyErrorLabel.Text = "Spy failed to build:\n" .. tostring(spyError)
 end
 
 -- ==========================================
--- 5. BACKGROUND MODULES (HUD, EVENT, FISH, GEMS)
+-- 5. BACKGROUND MODULES (HUD, RAID, FISH, GEMS)
 -- ==========================================
 local isHudEnabled = false
 local accHud = Instance.new("Frame", sg)
@@ -700,58 +704,6 @@ local function setHudState(state)
     end) end
 end
 hudTglBtn.MouseButton1Click:Connect(function() setHudState(not isHudEnabled) if SaveState then SaveState() end end)
-
-local function clickUIPath(pathStr)
-    local ok, clicked = pcall(function()
-        local parts = string.split(pathStr, ".") local current = game
-        for _, p in ipairs(parts) do
-            if p == "Players" then current = game.Players elseif p == "LocalPlayer" then current = LP else current = current:FindFirstChild(p) end
-            if not current then return false end
-        end
-        if not current or not current:IsA("GuiButton") then return false end
-        if type(firesignal) == "function" then
-            firesignal(current.MouseButton1Click)
-            return true
-        end
-        if type(getconnections) == "function" then
-            for _, connection in ipairs(getconnections(current.MouseButton1Click)) do
-                if type(connection.Function) == "function" then
-                    pcall(connection.Function)
-                    return true
-                end
-            end
-        end
-        return false
-    end)
-    return ok and clicked == true
-end
-
-local isSmelt, isPotion, isClaim = false, false, false
-local aSmelt = Instance.new("TextButton", aFrame) aSmelt.Size, aSmelt.Position, aSmelt.BackgroundColor3, aSmelt.TextColor3, aSmelt.Text, aSmelt.Font, aSmelt.TextSize, aSmelt.BorderSizePixel = U2(0,240,0,40), U2(0.5,-120,0,20), C3(50,50,50), C3(200,200,200), "[ ] Auto-Smelt All", F_GB, 13, 0
-local function setSmeltState(state)
-    isSmelt = state aSmelt.Text, aSmelt.BackgroundColor3 = isSmelt and "[X] Auto-Smelt All" or "[ ] Auto-Smelt All", isSmelt and C3(40,200,120) or C3(50,50,50)
-    if isSmelt then task.spawn(function() while isSmelt and mFrame:IsDescendantOf(game) do clickUIPath("Players.LocalPlayer.PlayerGui.Smelt.Frame.SmeltAllPack") task.wait(2) end end) end
-end
-aSmelt.MouseButton1Click:Connect(function() setSmeltState(not isSmelt) if SaveState then SaveState() end end)
-
-local aPotion = Instance.new("TextButton", aFrame) aPotion.Size, aPotion.Position, aPotion.BackgroundColor3, aPotion.TextColor3, aPotion.Text, aPotion.Font, aPotion.TextSize, aPotion.BorderSizePixel = U2(0,240,0,40), U2(0.5,-120,0,70), C3(50,50,50), C3(200,200,200), "[ ] Auto-Craft Potions (Max)", F_GB, 13, 0
-local function setPotionState(state)
-    isPotion = state aPotion.Text, aPotion.BackgroundColor3 = isPotion and "[X] Auto-Craft Potions (Max)" or "[ ] Auto-Craft Potions (Max)", isPotion and C3(40,200,120) or C3(50,50,50)
-    if isPotion then task.spawn(function() while isPotion and mFrame:IsDescendantOf(game) do clickUIPath("Players.LocalPlayer.PlayerGui.Potions.Frame.CraftMax") task.wait(5) end end) end
-end
-aPotion.MouseButton1Click:Connect(function() setPotionState(not isPotion) if SaveState then SaveState() end end)
-
-local aClaim = Instance.new("TextButton", aFrame) aClaim.Size, aClaim.Position, aClaim.BackgroundColor3, aClaim.TextColor3, aClaim.Text, aClaim.Font, aClaim.TextSize, aClaim.BorderSizePixel = U2(0,240,0,40), U2(0.5,-120,0,120), C3(50,50,50), C3(200,200,200), "[ ] Auto-Claim Group/Daily", F_GB, 13, 0
-local function setClaimState(state)
-    isClaim = state aClaim.Text, aClaim.BackgroundColor3 = isClaim and "[X] Auto-Claim Group/Daily" or "[ ] Auto-Claim Group/Daily", isClaim and C3(40,200,120) or C3(50,50,50)
-    if isClaim then task.spawn(function() while isClaim and mFrame:IsDescendantOf(game) do
-        clickUIPath("Players.LocalPlayer.PlayerGui.Rewards.Frame.Claim")
-        clickUIPath("Players.LocalPlayer.PlayerGui.LeaveRewards.Main.Claim")
-        clickUIPath("Players.LocalPlayer.PlayerGui.AdRewards.Frame.Claim")
-        task.wait(10)
-    end end) end
-end
-aClaim.MouseButton1Click:Connect(function() setClaimState(not isClaim) if SaveState then SaveState() end end)
 
 local fPnl = Instance.new("Frame", fFrame) fPnl.Size, fPnl.Position, fPnl.BackgroundColor3, fPnl.BorderSizePixel = U2(1,-20,1,-20), U2(0,10,0,10), C3(30,30,30), 0
 local fDelInp = mkInp(fPnl, "Loop Delay (Seconds)", "3", 50, -120) fDelInp.FocusLost:Connect(function() if SaveConfig then SaveConfig() end end)
@@ -875,8 +827,6 @@ local function setRaidState(state)
         return
     end
     task.spawn(function()
-        -- One raid clear is not the end of the queue. Stay up, re-read the live
-        -- vote/raid clock, and keep the first selected pack that is still under 9/9.
         local joinedKey, joinedPack, progressAtJoin = nil, nil, nil
         local fallbackKey, fallbackStart = nil, nil
         while raidRunning and raidRun == myRun and mFrame:IsDescendantOf(game) do
@@ -904,8 +854,6 @@ local function setRaidState(state)
             local raidDuration = (RaidConfig and RaidConfig.RaidDuration or 460) + (RaidConfig and RaidConfig.GracePeriod or 10)
             local progress = raidProgress(packName)
 
-            -- RaidStart is normally a server start timestamp. If it is missing, keep our own
-            -- clock from the moment this pack became active so the countdown still shows.
             if activePack ~= nil and raidStart == nil then
                 local key = tostring(activePack)
                 if fallbackKey ~= key or fallbackStart == nil then
@@ -969,8 +917,6 @@ local function setRaidState(state)
                 pcall(function() raidRemote:FireServer("Vote", packName) end)
                 task.wait(0.5)
             else
-                -- Cycle is over. Keep the button on and wait for the next vote/raid clock.
-                -- Only forget the join once this pack is no longer the active raid.
                 if activePack == nil or tostring(activePack) ~= tostring(joinedPack) then
                     joinedKey, joinedPack, progressAtJoin = nil, nil, nil
                 end
@@ -986,58 +932,6 @@ local function setRaidState(state)
     end)
 end
 raidBtn.MouseButton1Click:Connect(function() setRaidState(not raidRunning) end)
-
-local mangaPanel = Instance.new("Frame", mangaFrame)
-mangaPanel.Size, mangaPanel.Position, mangaPanel.BackgroundColor3, mangaPanel.BorderSizePixel = U2(1, -20, 1, -20), U2(0, 10, 0, 10), C3(30, 30, 30), 0
-local mangaStatus = Instance.new("TextLabel", mangaPanel)
-mangaStatus.Size, mangaStatus.Position, mangaStatus.BackgroundColor3, mangaStatus.TextColor3, mangaStatus.Text, mangaStatus.Font, mangaStatus.TextSize = U2(1, -20, 0, 42), U2(0, 10, 0, 12), C3(20, 20, 20), C3(200, 200, 200), "Requires SS+, level 30, Rainbow", F_GM, 12
-local mangaBtn = Instance.new("TextButton", mangaPanel)
-mangaBtn.Size, mangaBtn.Position, mangaBtn.BackgroundColor3, mangaBtn.TextColor3, mangaBtn.Text, mangaBtn.Font, mangaBtn.TextSize = U2(0, 260, 0, 40), U2(0.5, -130, 0, 80), C3(40, 200, 120), C3(255, 255, 255), "Start Auto-Manga", F_GB, 14
-local mangaRunning, mangaRun = false, 0
-
-local function setMangaState(state)
-    mangaRunning, mangaRun = state, mangaRun + 1
-    local myRun = mangaRun
-    mangaBtn.Text, mangaBtn.BackgroundColor3 = mangaRunning and "Stop Auto-Manga" or "Start Auto-Manga", mangaRunning and C3(200, 40, 40) or C3(40, 200, 120)
-    if not mangaRunning then
-        mangaStatus.Text = "Status: Idle"
-        return
-    end
-    local raidRemote = getRemote("Raid")
-    if not raidRemote or not CardConfig then
-        mangaRunning = false
-        mangaBtn.Text = "Manga data unavailable"
-        return
-    end
-    task.spawn(function()
-        while mangaRunning and mangaRun == myRun and mFrame:IsDescendantOf(game) do
-            local tokens = tonumber(getLiveData("MangaTokens")) or 0
-            local upgraded = 0
-            for packName, packData in pairs(CardConfig.Packs or {}) do
-                if not mangaRunning or mangaRun ~= myRun then break end
-                if type(packData) == "table" and type(packData.List) == "table" then
-                    local raids = tonumber(getLiveData("RaidsDefeated", "Packs", packName)) or 0
-                    for cardName, cardInfo in pairs(packData.List) do
-                        local record = getLiveRecord("Cards", cardName)
-                        local level = record and tonumber(record.Level) or 0
-                        local grade = record and exactGrade(record.Grade)
-                        local cost = math.round((tonumber(cardInfo.Layout) or 0) * 5)
-                        if record and record.Manga ~= true and level >= (RaidConfig and RaidConfig.LevelRequirement or 30) and grade and (GRADE_RANK[grade] or 0) >= (GRADE_RANK.SS or 9) and record.Mutation == "Rainbow" and raids >= (tonumber(cardInfo.Layout) or math.huge) and tokens >= cost then
-                            mangaStatus.Text = "Upgrading " .. cardName .. " (" .. packName .. ")"
-                            pcall(function() raidRemote:FireServer("Manga", cardName) end)
-                            upgraded = upgraded + 1
-                            task.wait(1)
-                            tokens = tonumber(getLiveData("MangaTokens")) or math.max(0, tokens - cost)
-                        end
-                    end
-                end
-            end
-            mangaStatus.Text = upgraded > 0 and ("Upgraded " .. upgraded .. " card(s)") or "No eligible cards found"
-            task.wait(5)
-        end
-    end)
-end
-mangaBtn.MouseButton1Click:Connect(function() setMangaState(not mangaRunning) end)
 
 local isFish, fEvt = false, getRemote("Fish")
 local function fishLoop()
@@ -1078,52 +972,6 @@ local function setGemsState(state)
     end) end
 end
 gmBtn.MouseButton1Click:Connect(function() setGemsState(not isGems) if SaveState then SaveState() end end)
-
-local hkDel = mkInp(hFrame, "Attack->Kill Delay", "0.3", 10, -250, 220) local hnDel = mkInp(hFrame, "Next Target Gap", "0.1", 70, -250, 220)
-local hmUnits = mkInp(hFrame, "Max Units", "24", 130, -250, 220) local hwDel = mkInp(hFrame, "Wave Reset Delay", "1", 10, 30, 220)
-local hzInp = mkInp(hFrame, "Zone Sizes", "4,6,8,6", 70, 30, 220) local hsInp = mkInp(hFrame, "Walk Speed (Studs/s)", "60", 130, 30, 220)
-for _, box in ipairs({hkDel, hnDel, hmUnits, hwDel, hzInp, hsInp}) do box.FocusLost:Connect(function() if SaveConfig then SaveConfig() end end) end
-
-local htTPBtn = Instance.new("TextButton", hFrame) htTPBtn.Size, htTPBtn.Position, htTPBtn.BackgroundColor3, htTPBtn.TextColor3, htTPBtn.Text, htTPBtn.Font, htTPBtn.TextSize, htTPBtn.BorderSizePixel = U2(0,240,0,30), U2(0.5,-120,0,190), C3(40,200,120), C3(255,255,255), "[X] Smart Walk To Zones", F_GB, 12, 0
-local hBtn = Instance.new("TextButton", hFrame) hBtn.Size, hBtn.Position, hBtn.BackgroundColor3, hBtn.TextColor3, hBtn.Text, hBtn.Font, hBtn.TextSize, hBtn.BorderSizePixel = U2(0,240,0,40), U2(0.5,-120,0,230), C3(40,200,120), C3(255,255,255), "Start Halloween Battle", F_GB, 14, 0
-local hStat = Instance.new("TextLabel", hFrame) hStat.Size, hStat.Position, hStat.BackgroundTransparency, hStat.TextColor3, hStat.Text, hStat.Font, hStat.TextSize = U2(0,240,0,25), U2(0.5,-120,0,280), 1, C3(200,200,200), "Status: Idle", F_GM, 12
-local isHal, isTP, HalEvt = false, true, getRemote("Halloween")
-htTPBtn.MouseButton1Click:Connect(function() isTP = not isTP htTPBtn.Text, htTPBtn.BackgroundColor3 = isTP and "[X] Smart Walk To Zones" or "[ ] Smart Walk To Zones", isTP and C3(40,200,120) or C3(50,50,50) if SaveConfig then SaveConfig() end end)
-local function tweenTo(targetCFrame) local hrp = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart") if not hrp then return end local dist = (hrp.Position - targetCFrame.Position).Magnitude local tSpeed = math.max(1, tonumber(hsInp.Text) or 60) local tw = TS:Create(hrp, TweenInfo.new(dist / tSpeed, Enum.EasingStyle.Linear), {CFrame = targetCFrame}) tw:Play() tw.Completed:Wait() end
-local function setHalState(state)
-    if not HalEvt then hBtn.Text = "ERR: NOT FOUND" return end
-    isHal = state hBtn.Text, hBtn.BackgroundColor3 = isHal and "Stop Halloween Battle" or "Start Halloween Battle", isHal and C3(200,40,40) or C3(40,200,120)
-    if isHal then task.spawn(function()
-        while isHal and mFrame:IsDescendantOf(game) do
-            local killDelay, nextGap, mx, waveDelay = tonumber(hkDel.Text) or 0.3, tonumber(hnDel.Text) or 0.1, tonumber(hmUnits.Text) or 24, tonumber(hwDel.Text) or 1
-            local zList = {} for s in string.gmatch(hzInp.Text, "%d+") do table.insert(zList, tonumber(s)) end if #zList == 0 then zList = {mx} end
-            local hrp = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-            local origCF, unitCounter = hrp and hrp.CFrame, 1
-            for zIdx, zSize in ipairs(zList) do
-                if not isHal or unitCounter > mx then break end
-                local startUnit, endUnit = unitCounter, math.min(unitCounter + zSize - 1, mx)
-                local midUnit = math.floor((startUnit + endUnit) / 2)
-                if isTP and hrp then
-                    local mobFol = workspace:FindFirstChild("Client") and workspace.Client:FindFirstChild("HalloweenEnemies")
-                    local mob = mobFol and mobFol:FindFirstChild(tostring(midUnit))
-                    local tpPart = mob and (mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart or mob:FindFirstChildWhichIsA("BasePart"))
-                    if tpPart then hStat.Text = "Walking to Zone " .. zIdx .. "..." tweenTo(tpPart.CFrame * CFrame.new(0, 0, 5)) end
-                end
-                for i = startUnit, endUnit do
-                    if not isHal or i > mx then break end
-                    hStat.Text = "Zone " .. zIdx .. " | Unit " .. i
-                    HalEvt:FireServer("Attack", i) task.wait(killDelay)
-                    if not isHal then break end
-                    HalEvt:FireServer("Kill", i) task.wait(nextGap)
-                end
-                unitCounter = endUnit + 1
-            end
-            if isTP and hrp and origCF then tweenTo(origCF) end
-            task.wait(waveDelay)
-        end hStat.Text = "Status: Idle"
-    end) end
-end
-hBtn.MouseButton1Click:Connect(function() setHalState(not isHal) if SaveState then SaveState() end end)
 
 -- ==========================================
 -- 6. STRICT CASH-ONLY GRADER
@@ -1223,7 +1071,7 @@ local function bGrader(pFrame, sData, pcData, rName, aName, gList, gRanks)
         if SaveState then SaveState() end
     end)
     
-    local dInp = mkInp(rPnl, "Delay (ms)", "300", 255, 0) dInp.Size = U2(1,0,0,30) dInp.Position = U2(0,0,0,275)
+    local dInp = mkFullInp(rPnl, "Delay (ms)", "300", 255, 30)
     dInp.FocusLost:Connect(function() if SaveConfig then SaveConfig() end end)
     local sgBtn = Instance.new("TextButton", rPnl) sgBtn.Size, sgBtn.Position, sgBtn.BackgroundColor3, sgBtn.TextColor3, sgBtn.Text, sgBtn.Font, sgBtn.TextSize, sgBtn.BorderSizePixel = U2(1,0,0,40), U2(0,0,0,315), C3(40,200,120), C3(255,255,255), "Start Grader", F_GB, 14, 0
     
@@ -1396,7 +1244,7 @@ end
 bGrader(cFrame, CardSortedPacks, CardPackCards, "Grade", "Roll", GRADE_LIST, GRADE_RANK)
 
 -- ==========================================
--- 7. TOWER TRAIT ROLLER (NETWORK INTERCEPT)
+-- 7. TOWER TRAIT ROLLER
 -- ==========================================
 local TowerAPI = {}
 
@@ -1474,11 +1322,11 @@ local function bTraitRoller(pFrame, sData, pcData)
         local towerConfig = require(RS.Modules.Config.Core.TowerConfig)
         for _, trait in ipairs(towerConfig.TraitList or {}) do towerTraits[#towerTraits + 1] = trait end
     end)
-    local tInp = mkDropdown(rPnl, "Target Tower Trait", towerTraits, towerTraits[1], 50, 260)
+    local tInp = mkDropdown(rPnl, "Target Tower Trait", towerTraits, towerTraits[1], 40, 260)
     
     local anBtn = Instance.new("TextButton", rPnl) anBtn.Size, anBtn.Position, anBtn.BackgroundColor3, anBtn.TextColor3, anBtn.Text, anBtn.Font, anBtn.TextSize, anBtn.BorderSizePixel = U2(1,0,0,30), U2(0,0,0,110), C3(40,200,120), C3(255,255,255), "[X] Auto Next Item", F_GB, 13, 0
     local apBtn = Instance.new("TextButton", rPnl) apBtn.Size, apBtn.Position, apBtn.BackgroundColor3, apBtn.TextColor3, apBtn.Text, apBtn.Font, apBtn.TextSize, apBtn.BorderSizePixel = U2(1,0,0,30), U2(0,0,0,150), C3(40,200,120), C3(255,255,255), "[X] Auto Next Pack", F_GB, 13, 0
-    local dInp = mkInp(rPnl, "Delay (ms)", "300", 255, 0) dInp.Size = U2(1,0,0,30) dInp.Position = U2(0,0,0,275)
+    local dInp = mkFullInp(rPnl, "Delay (ms)", "300", 255, 30)
     dInp.FocusLost:Connect(function() if SaveConfig then SaveConfig() end end)
     
     local stBtn = Instance.new("TextButton", rPnl) stBtn.Size, stBtn.Position, stBtn.BackgroundColor3, stBtn.TextColor3, stBtn.Text, stBtn.Font, stBtn.TextSize, stBtn.BorderSizePixel = U2(1,0,0,40), U2(0,0,0,315), C3(40,200,120), C3(255,255,255), "Start Roller", F_GB, 14, 0
@@ -1650,7 +1498,508 @@ end
 bTraitRoller(tFrame, CardSortedPacks, CardPackCards)
 
 -- ==========================================
--- 8. FIGURINE GRADE / TRAIT ROLLER
+-- 8. AUTO PACK OPENER (SNAKE GRID + TWO-PASS SNIPE)
+-- ==========================================
+local OpenerAPI = {}
+local function bOpener(pFrame, sData)
+    local lPnl = Instance.new("Frame", pFrame) 
+    lPnl.Size, lPnl.Position, lPnl.BackgroundColor3, lPnl.BorderSizePixel = U2(0,230,1,-20), U2(0,10,0,10), C3(30,30,30), 0
+    local pScr = Instance.new("ScrollingFrame", lPnl) 
+    pScr.Size, pScr.Position, pScr.BackgroundColor3, pScr.ScrollBarThickness, pScr.BorderSizePixel = U2(1,0,1,-25), U2(0,0,0,25), C3(25,25,25), 6, 0
+    local sLyt = Instance.new("UIListLayout", pScr) 
+    sLyt.SortOrder = Enum.SortOrder.LayoutOrder 
+    sLyt:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() pScr.CanvasSize = U2(0,0,0,sLyt.AbsoluteContentSize.Y) end)
+    
+    local saBtn = Instance.new("TextButton", lPnl) 
+    saBtn.Size, saBtn.BackgroundColor3, saBtn.TextColor3, saBtn.Text, saBtn.Font, saBtn.TextSize, saBtn.BorderSizePixel = U2(0.5,0,0,25), C3(40,40,40), C3(255,255,255), "Select All", F_GM, 12, 0
+    local daBtn = Instance.new("TextButton", lPnl) 
+    daBtn.Size, daBtn.Position, daBtn.BackgroundColor3, daBtn.TextColor3, daBtn.Text, daBtn.Font, daBtn.TextSize, daBtn.BorderSizePixel = U2(0.5,0,0,25), U2(0.5,0,0,0), C3(40,40,40), C3(255,255,255), "Deselect All", F_GM, 12, 0
+
+    local SData = {}
+    local BundleBtnMap = {}
+
+    local function getPackVariants(pN)
+        return {
+            pN .. "-Regular-Bundle",
+            pN .. "-Gold-Bundle",
+            pN .. "-Emerald-Bundle",
+            pN .. "-Void-Bundle",
+            pN .. "-Diamond-Bundle",
+            pN .. "-Rainbow-Bundle",
+            pN,
+            pN .. "-Gold",
+            pN .. "-Emerald",
+            pN .. "-Void",
+            pN .. "-Diamond",
+            pN .. "-Rainbow"
+        }
+    end
+
+    local function getOwnedPackCount(itemName)
+        local packs = getLiveData("Packs")
+        if type(packs) == "table" then
+            return tonumber(packs[itemName]) or 0
+        end
+        return 0
+    end
+
+    local function uncheckBundle(bName)
+        for pN, pD in pairs(SData) do
+            if pD.items[bName] ~= nil then
+                pD.items[bName] = false
+                local btn = BundleBtnMap[bName]
+                if btn then
+                    local cnt = getOwnedPackCount(bName)
+                    btn.Text = "   ↳ [ ] " .. bName .. (cnt > 0 and (" (" .. cnt .. ")") or "")
+                    btn.TextColor3 = C3(150, 150, 150)
+                end
+                
+                local anyLeft = false
+                for _, v in pairs(pD.items) do if v then anyLeft = true break end end
+                pD.isSelected = anyLeft
+                pD.cBtn.Text = (anyLeft and " [X] " or " [ ] ") .. pN
+                pD.cBtn.TextColor3 = anyLeft and C3(40, 200, 120) or C3(200, 200, 200)
+                if SaveState then SaveState() end
+                break
+            end
+        end
+    end
+
+    for lIdx, pD in ipairs(sData) do
+        local pN = pD.Name 
+        SData[pN] = { isSelected = false, items = {} }
+        local variants = getPackVariants(pN)
+        
+        local pC = Instance.new("Frame", pScr) 
+        pC.Size, pC.BackgroundTransparency, pC.LayoutOrder, pC.AutomaticSize = U2(1,0,0,25), 1, lIdx, Enum.AutomaticSize.Y
+        Instance.new("UIListLayout", pC).SortOrder = Enum.SortOrder.LayoutOrder
+        
+        local pH = Instance.new("Frame", pC) 
+        pH.Size, pH.BackgroundColor3, pH.BorderSizePixel, pH.LayoutOrder = U2(1,0,0,25), C3(30,30,30), 0, 1
+        local eBtn = Instance.new("TextButton", pH) 
+        eBtn.Size, eBtn.BackgroundColor3, eBtn.TextColor3, eBtn.Text, eBtn.Font, eBtn.BorderSizePixel = U2(0,25,0,25), C3(35,35,35), C3(200,200,200), "+", F_GB, 0
+        local cBtn = Instance.new("TextButton", pH) 
+        cBtn.Size, cBtn.Position, cBtn.BackgroundTransparency, cBtn.TextColor3, cBtn.Text, cBtn.Font, cBtn.TextSize, cBtn.TextXAlignment = U2(1,-25,1,0), U2(0,25,0,0), 1, C3(200,200,200), " [ ] "..pN, F_GM, 12, Enum.TextXAlignment.Left
+        SData[pN].cBtn = cBtn
+        
+        local iF = Instance.new("Frame", pC) 
+        iF.Size, iF.BackgroundTransparency, iF.Visible, iF.LayoutOrder, iF.AutomaticSize = U2(1,0,0,0), 1, false, 2, Enum.AutomaticSize.Y
+        Instance.new("UIListLayout", iF) 
+        
+        local iBtns = {} 
+        for _, bN in ipairs(variants) do
+            SData[pN].items[bN] = false
+            local ib = Instance.new("TextButton", iF) 
+            ib.Size, ib.BackgroundColor3, ib.TextColor3, ib.Text, ib.Font, ib.TextSize, ib.TextXAlignment, ib.BorderSizePixel = U2(1,0,0,20), C3(20,20,20), C3(150,150,150), "   ↳ [ ] "..bN, F_GM, 10, Enum.TextXAlignment.Left, 0
+            BundleBtnMap[bN] = ib
+            ib.MouseButton1Click:Connect(function()
+                local s = not SData[pN].items[bN] 
+                SData[pN].items[bN] = s
+                local cnt = getOwnedPackCount(bN)
+                ib.Text = "   ↳ "..(s and "[X] " or "[ ] ")..bN .. (cnt > 0 and (" (" .. cnt .. ")") or "")
+                ib.TextColor3 = s and C3(40,200,120) or C3(150, 150, 150)
+                if SaveState then SaveState() end
+            end)
+            table.insert(iBtns, {btn=ib, name=bN, update = function(s) 
+                SData[pN].items[bN] = s 
+                local cnt = getOwnedPackCount(bN)
+                ib.Text = "   ↳ "..(s and "[X] " or "[ ] ")..bN .. (cnt > 0 and (" (" .. cnt .. ")") or "")
+                ib.TextColor3 = s and C3(40,200,120) or C3(150, 150, 150) 
+            end})
+            table.insert(AllOpenerButtons, {btn=ib, name=bN, packName=pN, selData=SData})
+        end
+        eBtn.MouseButton1Click:Connect(function() iF.Visible = not iF.Visible eBtn.Text = iF.Visible and "-" or "+" end)
+        local function updUI(s)
+            SData[pN].isSelected = s cBtn.Text = (s and " [X] " or " [ ] ")..pN cBtn.TextColor3 = s and C3(40,200,120) or C3(200,200,200)
+            for _, d in ipairs(iBtns) do d.update(s) end
+        end
+        cBtn.MouseButton1Click:Connect(function() updUI(not SData[pN].isSelected) if SaveState then SaveState() end end)
+        SData[pN].updateUI = updUI
+    end
+
+    saBtn.MouseButton1Click:Connect(function() for _, pd in pairs(SData) do pd.updateUI(true) end if SaveState then SaveState() end end)
+    daBtn.MouseButton1Click:Connect(function() for _, pd in pairs(SData) do pd.updateUI(false) end if SaveState then SaveState() end end)
+
+    local rPnl = Instance.new("Frame", pFrame) 
+    rPnl.Size, rPnl.Position, rPnl.BackgroundTransparency = U2(1,-250,1,-20), U2(0,250,0,10), 1
+    
+    local bundlesOnly = true
+    local bOnlyBtn = Instance.new("TextButton", rPnl)
+    bOnlyBtn.Size, bOnlyBtn.Position, bOnlyBtn.BackgroundColor3, bOnlyBtn.TextColor3, bOnlyBtn.Text, bOnlyBtn.Font, bOnlyBtn.TextSize, bOnlyBtn.BorderSizePixel = U2(0.48,0,0,28), U2(0,0,0,0), C3(40,200,120), C3(255,255,255), "[X] Bundles Only", F_GB, 11, 0
+
+    local opScanBtn = Instance.new("TextButton", rPnl)
+    opScanBtn.Size, opScanBtn.Position, opScanBtn.BackgroundColor3, opScanBtn.TextColor3, opScanBtn.Text, opScanBtn.Font, opScanBtn.TextSize, opScanBtn.BorderSizePixel = U2(0.50,0,0,28), U2(0.50,0,0,0), C3(40,120,200), C3(255,255,255), "Scan Bag & Queue", F_GB, 11, 0
+
+    bOnlyBtn.MouseButton1Click:Connect(function()
+        bundlesOnly = not bundlesOnly
+        bOnlyBtn.Text = bundlesOnly and "[X] Bundles Only" or "[ ] All Packs+Bundles"
+        bOnlyBtn.BackgroundColor3 = bundlesOnly and C3(40,200,120) or C3(50,50,50)
+    end)
+
+    opScanBtn.MouseButton1Click:Connect(function()
+        opScanBtn.Text = "Scanning..."
+        local packsData = getLiveData("Packs") or {}
+        local count = 0
+        for pN, pD in pairs(SData) do
+            local anyInPack = false
+            for bName, _ in pairs(pD.items) do
+                local owned = tonumber(packsData[bName]) or 0
+                local isBundle = string.find(bName, "%-Bundle$") ~= nil
+                local shouldQueue = (owned > 0) and (not bundlesOnly or isBundle)
+                pD.items[bName] = shouldQueue
+                if BundleBtnMap[bName] then
+                    BundleBtnMap[bName].Text = "   ↳ " .. (shouldQueue and "[X] " or "[ ] ") .. bName .. (owned > 0 and (" (" .. owned .. ")") or "")
+                    BundleBtnMap[bName].TextColor3 = shouldQueue and C3(40,200,120) or C3(150,150,150)
+                end
+                if shouldQueue then
+                    anyInPack = true
+                    count = count + 1
+                end
+            end
+            pD.isSelected = anyInPack
+            pD.cBtn.Text = (anyInPack and " [X] " or " [ ] ") .. pN
+            pD.cBtn.TextColor3 = anyInPack and C3(40,200,120) or C3(200,200,200)
+        end
+        opScanBtn.Text = "Queued " .. count .. " Items!"
+        if SaveState then SaveState() end
+        task.delay(1.5, function() opScanBtn.Text = "Scan Bag & Queue" end)
+    end)
+    
+    local opPotInp = mkFullInp(rPnl, "Hatch Potion (HatchTime1 / HatchTime2)", "HatchTime2", 38, 28)
+    local opAmtInp = mkFullInp(rPnl, "Batch Size (Max 22)", "22", 92, 28)
+    local opSpdInp = mkFullInp(rPnl, "Drop/TP Speed (ms) [Lower = Faster]", "35", 146, 28)
+    local opDelInp = mkFullInp(rPnl, "Loop Delay (Seconds)", "1.5", 200, 28)
+
+    for _, box in ipairs({opPotInp, opAmtInp, opSpdInp, opDelInp}) do
+        box.FocusLost:Connect(function() if SaveConfig then SaveConfig() end end)
+    end
+    
+    local sLbl = Instance.new("TextLabel", rPnl) 
+    sLbl.Size, sLbl.Position, sLbl.BackgroundColor3, sLbl.TextColor3, sLbl.Text, sLbl.Font, sLbl.TextSize, sLbl.BorderSizePixel = U2(1,0,0,25), U2(0,0,0,258), C3(20,20,20), C3(200,200,200), "Status: Idle", F_GM, 12, 0
+
+    local opBtn = Instance.new("TextButton", rPnl)
+    opBtn.Size, opBtn.Position, opBtn.BackgroundColor3, opBtn.TextColor3, opBtn.Text, opBtn.Font, opBtn.TextSize, opBtn.BorderSizePixel = U2(1,0,0,40), U2(0,0,0,290), C3(40,200,120), C3(255,255,255), "Start Auto-Opener", F_GB, 14, 0
+
+    local isOpener = false
+    local opCardEvt = getRemote("Card")
+    local opPotEvt = getRemote("Potion")
+
+    local function fireGuiButton(btn)
+        if not btn or not btn:IsA("GuiButton") then return false end
+        local fired = false
+        if type(firesignal) == "function" then
+            pcall(function() firesignal(btn.MouseButton1Click) fired = true end)
+            pcall(function() firesignal(btn.Activated) fired = true end)
+        end
+        if not fired and type(getconnections) == "function" then
+            for _, sig in ipairs({btn.MouseButton1Click, btn.Activated}) do
+                for _, conn in ipairs(getconnections(sig)) do
+                    if type(conn.Function) == "function" then
+                        pcall(conn.Function)
+                        fired = true
+                    end
+                end
+            end
+        end
+        return fired
+    end
+
+    local function ensureBundleEquipped(targetItem, forceClear)
+        if not forceClear then
+            local hotbar = getLiveData("Hotbar")
+            if type(hotbar) == "table" then
+                for _, val in pairs(hotbar) do
+                    if val == targetItem then return true end
+                end
+            end
+        end
+
+        local pg = LP:FindFirstChild("PlayerGui")
+        local autoPlayFrame = pg and pg:FindFirstChild("AutoPlay") and pg.AutoPlay:FindFirstChild("Frame")
+
+        if autoPlayFrame and autoPlayFrame:FindFirstChild("PacksEquipped") and autoPlayFrame.PacksEquipped:FindFirstChild("Main") then
+            local eqMain = autoPlayFrame.PacksEquipped.Main
+            for slotIdx = 1, 8 do
+                local slotFrame = eqMain:FindFirstChild(tostring(slotIdx))
+                local unequipBtn = slotFrame and slotFrame:FindFirstChild("Unequip")
+                if unequipBtn and unequipBtn.Visible then
+                    fireGuiButton(unequipBtn)
+                end
+            end
+        end
+        if opCardEvt then
+            local hbNow = getLiveData("Hotbar")
+            if type(hbNow) == "table" then
+                for slotKey, eqItem in pairs(hbNow) do
+                    if forceClear or eqItem ~= targetItem then
+                        pcall(function() opCardEvt:FireServer("Unequip", tostring(slotKey)) end)
+                        pcall(function() opCardEvt:FireServer("Unequip", tonumber(slotKey) or slotKey) end)
+                        pcall(function() opCardEvt:FireServer("Unequip", eqItem) end)
+                    end
+                end
+            end
+        end
+        task.wait(0.15)
+
+        if autoPlayFrame and autoPlayFrame:FindFirstChild("PackFrame") then
+            local packBtn = autoPlayFrame.PackFrame:FindFirstChild(targetItem)
+            if packBtn then
+                fireGuiButton(packBtn)
+            end
+        end
+        if opCardEvt then
+            pcall(function() opCardEvt:FireServer("Equip", targetItem) end)
+        end
+        task.wait(0.2)
+
+        local verifyHb = getLiveData("Hotbar")
+        if type(verifyHb) == "table" then
+            for _, val in pairs(verifyHb) do
+                if val == targetItem then return true end
+            end
+        end
+        return false
+    end
+
+    local function setOpenerRunning(state)
+        isOpener = state
+        opBtn.Text = isOpener and "Stop Auto-Opener" or "Start Auto-Opener"
+        opBtn.BackgroundColor3 = isOpener and C3(200,40,40) or C3(40,200,120)
+        
+        if not isOpener then
+            sLbl.Text = "Idle"
+            if SaveState then SaveState() end
+            return
+        end
+
+        local aQ = {} 
+        for _, pD in ipairs(sData) do
+            local pN = pD.Name
+            if SData[pN] then
+                for _, bN in ipairs(getPackVariants(pN)) do
+                    if SData[pN].items[bN] then table.insert(aQ, {Pack=pN, Item=bN}) end
+                end
+            end
+        end
+        if #aQ == 0 then isOpener = false sLbl.Text = "ERR: NO BUNDLES QUEUED" opBtn.Text, opBtn.BackgroundColor3 = "Start Auto-Opener", C3(40,200,120) if SaveState then SaveState() end return end
+
+        local cIdx = 1
+        if SaveState then SaveState() end
+        
+        task.spawn(function()
+            while isOpener and mFrame:IsDescendantOf(game) do
+                local cT = aQ[cIdx]
+                if not cT then
+                    isOpener = false
+                    sLbl.Text = "Finished Queue!"
+                    opBtn.Text, opBtn.BackgroundColor3 = "Start Auto-Opener", C3(40,200,120)
+                    if SaveState then SaveState() end
+                    break
+                end
+
+                local ownedBefore = getOwnedPackCount(cT.Item)
+                if ownedBefore <= 0 then
+                    uncheckBundle(cT.Item)
+                    cIdx = cIdx + 1
+                    sLbl.Text = cT.Item .. " (0 owned) -> Next"
+                    task.wait(0.1)
+                    continue
+                end
+
+                sLbl.Text = "Equipping: " .. cT.Item .. " (" .. ownedBefore .. ")"
+                ensureBundleEquipped(cT.Item, false)
+
+                local potName = stripTags(opPotInp.Text)
+                local maxBatch = tonumber(opAmtInp.Text) or 22
+                local amt = math.min(maxBatch, ownedBefore)
+                local spdMs = tonumber(opSpdInp.Text) or 35
+                local spdSec = math.max(0.015, spdMs / 1000)
+                
+                local char = LP.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                if not hrp then task.wait(1) continue end
+                
+                local baseCFrame = hrp.CFrame
+                local gridCenterCF = baseCFrame * CFrame.new(0, 0, -40)
+                -- 9-stud spacing prevents larger Diamond/Void mutation hitboxes from overlapping
+                local columns, spacing = 8, 9
+                local totalRows = math.ceil(amt / columns)
+                local dropLocations = {}
+
+                sLbl.Text = "Dropping " .. amt .. "x " .. cT.Item
+                for i = 1, amt do
+                    if not isOpener then break end
+                    if getOwnedPackCount(cT.Item) <= 0 then break end
+                    local row = math.floor((i - 1) / columns)
+                    local colInRow = (i - 1) % columns
+                    -- Boustrophedon (snake) pathing: even rows L->R, odd rows R->L
+                    local col = (row % 2 == 0) and colInRow or (columns - 1 - colInRow)
+                    local offsetX = (col - (columns - 1) / 2) * spacing
+                    local offsetZ = (row - (totalRows - 1) / 2) * spacing
+                    
+                    local dropCF = gridCenterCF * CFrame.new(offsetX, 0, offsetZ)
+                    table.insert(dropLocations, dropCF)
+                    
+                    hrp.AssemblyLinearVelocity = Vector3.zero
+                    hrp.CFrame = dropCF
+                    task.wait(spdSec)
+                    if opCardEvt then pcall(function() opCardEvt:FireServer("Place", cT.Item) end) end
+                    task.wait(spdSec)
+                end
+                
+                if not isOpener then hrp.CFrame = baseCFrame break end
+                
+                local function getGridPrompts()
+                    local list = {}
+                    for _, obj in ipairs(workspace:GetDescendants()) do
+                        if obj:IsA("ProximityPrompt") and obj.Enabled then
+                            local part = obj.Parent
+                            if part and part:IsA("Model") then part = part.PrimaryPart or part:FindFirstChildWhichIsA("BasePart") end
+                            if part and part:IsA("Attachment") then part = part.Parent end
+                            local pPos = part and part:IsA("BasePart") and part.Position
+                            if pPos then
+                                local rel = gridCenterCF:PointToObjectSpace(pPos)
+                                if math.abs(rel.X) <= 42 and math.abs(rel.Z) <= 24 then
+                                    table.insert(list, {prompt = obj, pos = pPos, relX = rel.X, relZ = rel.Z})
+                                end
+                            end
+                        end
+                    end
+                    table.sort(list, function(a, b)
+                        if math.abs(a.relZ - b.relZ) > 3 then return a.relZ < b.relZ end
+                        return a.relX < b.relX
+                    end)
+                    return list
+                end
+
+                task.wait(0.25)
+                local validPrompts = getGridPrompts()
+                if #validPrompts == 0 then
+                    local ownedAfter = getOwnedPackCount(cT.Item)
+                    if ownedAfter <= 0 then
+                        uncheckBundle(cT.Item)
+                        cIdx = cIdx + 1
+                        sLbl.Text = cT.Item .. " Depleted!"
+                    else
+                        sLbl.Text = "Hotbar rejected Place! Force-clearing..."
+                        ensureBundleEquipped(cT.Item, true)
+                    end
+                    hrp.CFrame = baseCFrame
+                    task.wait(0.5)
+                    continue
+                end
+
+                if potName ~= "" and opPotEvt then
+                    sLbl.Text = "Applying Potions..."
+                    for _ = 1, 7 do
+                        pcall(function() opPotEvt:FireServer("Apply10", potName) end)
+                        task.wait(0.04)
+                    end
+                    task.wait(0.2)
+                end
+                
+                sLbl.Text = "Opening " .. #validPrompts .. " Packs..."
+                if fireproximityprompt then
+                    -- Pass 1: Zero HoldDuration/LOS and snipe all prompts in spatial order
+                    for _, entry in ipairs(validPrompts) do
+                        if not isOpener then break end
+                        if entry.prompt and entry.prompt.Parent then
+                            pcall(function()
+                                entry.prompt.HoldDuration = 0
+                                entry.prompt.RequiresLineOfSight = false
+                            end)
+                            hrp.AssemblyLinearVelocity = Vector3.zero
+                            hrp.CFrame = CFrame.new(entry.pos + Vector3.new(0, 2.5, 0))
+                            task.wait(math.max(0.03, spdSec * 0.7))
+                            pcall(fireproximityprompt, entry.prompt)
+                        end
+                    end
+                    -- Pass 2: Straggler sweep for any prompts that missed server tick validation
+                    task.wait(0.2)
+                    local stragglers = getGridPrompts()
+                    if #stragglers > 0 and isOpener then
+                        sLbl.Text = "Cleaning up " .. #stragglers .. " stragglers..."
+                        for _, entry in ipairs(stragglers) do
+                            if not isOpener then break end
+                            if entry.prompt and entry.prompt.Parent then
+                                hrp.AssemblyLinearVelocity = Vector3.zero
+                                hrp.CFrame = CFrame.new(entry.pos + Vector3.new(0, 2.5, 0))
+                                task.wait(math.max(0.04, spdSec))
+                                pcall(fireproximityprompt, entry.prompt)
+                            end
+                        end
+                    end
+                    task.wait(0.25)
+                else
+                    for _, cf in ipairs(dropLocations) do
+                        if not isOpener then break end
+                        hrp.CFrame = cf
+                        task.wait(spdSec)
+                        VIM:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+                        task.wait(1.2)
+                        VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+                    end
+                end
+                
+                hrp.AssemblyLinearVelocity = Vector3.zero
+                hrp.CFrame = baseCFrame
+                if getOwnedPackCount(cT.Item) <= 0 then
+                    uncheckBundle(cT.Item)
+                    cIdx = cIdx + 1
+                end
+                local loopDel = tonumber(opDelInp.Text) or 1.5
+                sLbl.Text = "Waiting " .. loopDel .. "s..."
+                task.wait(loopDel)
+            end
+        end)
+    end
+    opBtn.MouseButton1Click:Connect(function() setOpenerRunning(not isOpener) if SaveState then SaveState() end end)
+
+    OpenerAPI.GetConfig = function() return {potion = opPotInp.Text, amt = opAmtInp.Text, spd = opSpdInp.Text, delay = opDelInp.Text} end
+    OpenerAPI.LoadConfig = function(cfg)
+        if type(cfg) ~= "table" then return end
+        if cfg.potion then opPotInp.Text = tostring(cfg.potion) end
+        if cfg.amt then opAmtInp.Text = tostring(cfg.amt) end
+        if cfg.spd then opSpdInp.Text = tostring(cfg.spd) end
+        if cfg.delay then opDelInp.Text = tostring(cfg.delay) end
+    end
+    OpenerAPI.GetState = function()
+        local checked = {}
+        for _, pD in pairs(SData) do
+            for bN, isS in pairs(pD.items) do if isS then table.insert(checked, bN) end end
+        end
+        return {isO = isOpener, items = checked}
+    end
+    OpenerAPI.LoadState = function(st)
+        if type(st) ~= "table" then return end
+        local lookup = {} for _, bN in ipairs(st.items or {}) do lookup[bN] = true end
+        for pN, pD in pairs(SData) do
+            local anySelected = false
+            for bN, _ in pairs(pD.items) do
+                local s = lookup[bN] == true
+                pD.items[bN] = s
+                if s then anySelected = true end
+                local btn = BundleBtnMap[bN]
+                if btn then
+                    local cnt = getOwnedPackCount(bN)
+                    btn.Text = "   ↳ " .. (s and "[X] " or "[ ] ") .. bN .. (cnt > 0 and (" (" .. cnt .. ")") or "")
+                    btn.TextColor3 = s and C3(40, 200, 120) or C3(150, 150, 150)
+                end
+            end
+            pD.isSelected = anySelected
+            pD.cBtn.Text = (anySelected and " [X] " or " [ ] ") .. pN
+            pD.cBtn.TextColor3 = anySelected and C3(40, 200, 120) or C3(200, 200, 200)
+        end
+        if st.isO and #(st.items or {}) > 0 then
+            sLbl.Text = "Resuming in 2s..."
+            task.delay(2, function() setOpenerRunning(true) end)
+        end
+    end
+end
+bOpener(oFrame, CardSortedPacks)
+
+-- ==========================================
+-- 9. FIGURINE GRADE / TRAIT ROLLER
 -- ==========================================
 local FigurineAPI = {}
 
@@ -1687,7 +2036,7 @@ local function buildFigurineGrader(parent)
     local gradeInp = mkDropdown(controls, "Target Figurine Grade", figurineGrades, "UR", 82, 260)
     local traitInp = mkDropdown(controls, "Target Figurine Trait", figurineTraits, figurineTraits[1], 140, 260)
     traitInp.Visible = false
-    local delayInp = mkInp(controls, "Delay (ms)", "300", 198, 0, 260)
+    local delayInp = mkFullInp(controls, "Delay (ms)", "300", 198, 30)
     local selectBtn = Instance.new("TextButton", controls)
     selectBtn.Size, selectBtn.Position, selectBtn.BackgroundColor3, selectBtn.TextColor3, selectBtn.Text, selectBtn.Font, selectBtn.TextSize = U2(0.5, -4, 0, 32), U2(0, 0, 0, 258), C3(45, 45, 45), C3(255, 255, 255), "Select All", F_GM, 12
     local clearBtn = selectBtn:Clone()
@@ -1740,22 +2089,29 @@ local function buildFigurineGrader(parent)
         b.MouseButton1Click:Connect(function()
             selected[name] = not selected[name]
             paint(name)
+            if SaveState then SaveState() end
         end)
     end
     refresh()
 
-    modeBtn.MouseButton1Click:Connect(function()
-        mode = mode == "Grade" and "Trait" or "Grade"
+    local function setMode(newMode)
+        mode = (newMode == "Trait") and "Trait" or "Grade"
         modeBtn.Text = "Mode: " .. mode
         gradeInp.Visible, traitInp.Visible = mode == "Grade", mode == "Trait"
+        if SaveConfig then SaveConfig() end
+    end
+    modeBtn.MouseButton1Click:Connect(function()
+        setMode(mode == "Grade" and "Trait" or "Grade")
     end)
     selectBtn.MouseButton1Click:Connect(function()
         for _, name in ipairs(names) do selected[name] = true end
         refresh()
+        if SaveState then SaveState() end
     end)
     clearBtn.MouseButton1Click:Connect(function()
         for _, name in ipairs(names) do selected[name] = false end
         refresh()
+        if SaveState then SaveState() end
     end)
 
     if gallery then
@@ -1778,13 +2134,22 @@ local function buildFigurineGrader(parent)
         return false
     end
 
-    runBtn.MouseButton1Click:Connect(function()
-        if running then
-            running, runId, waiting = false, runId + 1, false
-            runBtn.Text, runBtn.BackgroundColor3 = "Start Figurine Roller", C3(40, 200, 120)
-            status.Text = "Stopped"
+    local function finishRun(msg)
+        running, waiting = false, false
+        runBtn.Text, runBtn.BackgroundColor3 = "Start Figurine Roller", C3(40, 200, 120)
+        if msg then status.Text = msg end
+        if SaveState then SaveState() end
+    end
+
+    local function setRunning(state)
+        if not state then
+            if running then
+                running, runId = false, runId + 1
+                finishRun("Stopped")
+            end
             return
         end
+        if running then return end
         if not gallery then
             status.Text = "Gallery remote missing"
             return
@@ -1795,17 +2160,16 @@ local function buildFigurineGrader(parent)
                 queue[#queue + 1] = name
             end
         end
-        if #queue == 0 then status.Text = "Select at least one figurine" return end
+        if #queue == 0 then status.Text = "Select at least one owned figurine" return end
         running, runId = true, runId + 1
         local myRun, index = runId, 1
         runBtn.Text, runBtn.BackgroundColor3 = "Stop Figurine Roller", C3(200, 40, 40)
+        if SaveState then SaveState() end
         task.spawn(function()
             while running and runId == myRun do
                 local name = queue[index]
                 if not name then
-                    running = false
-                    status.Text = "Finished"
-                    runBtn.Text, runBtn.BackgroundColor3 = "Start Figurine Roller", C3(40, 200, 120)
+                    finishRun("Finished")
                     break
                 end
                 local ownedRecord = getLiveRecord("Figurines", name)
@@ -1815,6 +2179,9 @@ local function buildFigurineGrader(parent)
                 else
                     local current = currentValue(name, mode)
                     if targetMet(current) then
+                        selected[name] = false
+                        paint(name)
+                        if SaveState then SaveState() end
                         index = index + 1
                     else
                         status.Text = "Rolling " .. mode .. ": " .. name
@@ -1829,6 +2196,9 @@ local function buildFigurineGrader(parent)
                             status.Text = "Timed out: " .. name
                             index = index + 1
                         elseif result and targetMet(result) then
+                            selected[name] = false
+                            paint(name)
+                            if SaveState then SaveState() end
                             index = index + 1
                         end
                         local remaining = delaySec - (os.clock() - started)
@@ -1838,7 +2208,8 @@ local function buildFigurineGrader(parent)
                 refresh()
             end
         end)
-    end)
+    end
+    runBtn.MouseButton1Click:Connect(function() setRunning(not running) end)
 
     task.spawn(function()
         while parent:IsDescendantOf(game) do
@@ -1846,12 +2217,48 @@ local function buildFigurineGrader(parent)
             task.wait(1)
         end
     end)
+
+    FigurineAPI.GetConfig = function()
+        return { mode = mode, grade = gradeInp.Text, trait = traitInp.Text, delay = delayInp.Text }
+    end
+    FigurineAPI.LoadConfig = function(c)
+        if type(c) ~= "table" then return end
+        if c.mode == "Grade" or c.mode == "Trait" then setMode(c.mode) end
+        if c.grade and c.grade ~= "" then gradeInp.Text = tostring(c.grade) end
+        if c.trait and c.trait ~= "" then traitInp.Text = tostring(c.trait) end
+        if c.delay then delayInp.Text = tostring(c.delay) end
+    end
+    FigurineAPI.GetState = function()
+        local items = {}
+        for _, name in ipairs(names) do
+            if selected[name] then items[#items + 1] = name end
+        end
+        return { isF = running, items = items }
+    end
+    FigurineAPI.LoadState = function(st)
+        if type(st) ~= "table" then return end
+        selected = {}
+        local count = 0
+        for _, name in ipairs(st.items or {}) do
+            if buttons[name] then
+                selected[name] = true
+                count = count + 1
+            end
+        end
+        refresh()
+        if st.isF == true and count > 0 then
+            status.Text = "Resuming in 2s..."
+            task.delay(2, function() setRunning(true) end)
+        elseif running then
+            setRunning(false)
+        end
+    end
 end
 
 buildFigurineGrader(figFrame)
 
 -- ==========================================
--- 9. SETTINGS TAB & AUTO-SYNC ENGINE
+-- 10. SETTINGS TAB & AUTO-SYNC ENGINE
 -- ==========================================
 local sPnl = Instance.new("Frame", sFrame)
 sPnl.Size, sPnl.Position, sPnl.BackgroundColor3, sPnl.BorderSizePixel = U2(1,-20,1,-20), U2(0,10,0,10), C3(30,30,30), 0
@@ -1904,69 +2311,167 @@ statusFileLbl.Text = "Auto-Sync Active (No manual save/load required)"
 
 local rstBtn = Instance.new("TextButton", sPnl)
 rstBtn.Size, rstBtn.Position, rstBtn.BackgroundColor3, rstBtn.TextColor3, rstBtn.Text, rstBtn.Font, rstBtn.TextSize, rstBtn.BorderSizePixel = U2(0,240,0,35), U2(0.5,-120,0,250), C3(180,50,50), C3(255,255,255), "Reset Account State & Queue", F_GB, 12, 0
+
+local Persist = {}
+
+function Persist.safe(fn, ...)
+    if type(fn) ~= "function" then return nil end
+    local ok, value = pcall(fn, ...)
+    if ok then return value end
+    return nil
+end
+
+function Persist.readJson(path)
+    if not (readfile and isfile and isfile(path)) then return nil end
+    local ok, data = pcall(function() return HS:JSONDecode(readfile(path)) end)
+    if ok and type(data) == "table" then return data end
+    return nil
+end
+
+function Persist.dataReady()
+    local ok, ready = pcall(function()
+        if type(getLiveData("Cards")) == "table" then return true end
+        if type(getLiveData("Figurines")) == "table" then return true end
+        return false
+    end)
+    return ok and ready == true
+end
+
+function Persist.waitReady(timeout)
+    local t0 = os.clock()
+    while not Persist.dataReady() and os.clock() - t0 < timeout do task.wait(0.5) end
+    return Persist.dataReady()
+end
+
+function Persist.getRaid()
+    local packs = {}
+    for _, name in ipairs(raidPacks) do
+        if raidSelectedPacks[name] then packs[#packs + 1] = name end
+    end
+    return { running = raidRunning, packs = packs }
+end
+
+function Persist.loadRaid(st)
+    if type(st) ~= "table" then return end
+    for name in pairs(raidSelectedPacks) do raidSelectedPacks[name] = nil end
+    for _, name in ipairs(st.packs or {}) do
+        if raidPackButtons[name] then raidSelectedPacks[name] = true end
+    end
+    refreshRaidPackRows()
+    if st.running and next(raidSelectedPacks) ~= nil and not raidRunning then
+        setRaidState(true)
+    end
+end
+
+function Persist.buildConfig()
+    return {
+        userId = LP.UserId, accountName = LP.Name, uiScale = scInp.Text, afk = isAFK, fishDelay = fDelInp.Text,
+        grader = Persist.safe(GraderAPI.GetConfig),
+        tower = Persist.safe(TowerAPI.GetConfig),
+        opener = Persist.safe(OpenerAPI.GetConfig),
+        fig = Persist.safe(FigurineAPI.GetConfig),
+    }
+end
+
+function Persist.buildState()
+    return {
+        userId = LP.UserId, accountName = LP.Name,
+        fish = isFish, gems = isGems, hud = isHudEnabled,
+        raid = Persist.getRaid(),
+        grader = Persist.safe(GraderAPI.GetState),
+        tower = Persist.safe(TowerAPI.GetState),
+        opener = Persist.safe(OpenerAPI.GetState),
+        fig = Persist.safe(FigurineAPI.GetState),
+    }
+end
+
+SaveConfig = function()
+    if not writefile then return end
+    pcall(function() writefile(ConfigFileName, HS:JSONEncode(Persist.buildConfig())) end)
+end
+
+SaveState = function()
+    if not writefile then return end
+    pcall(function() writefile(StateFileName, HS:JSONEncode(Persist.buildState())) end)
+end
+
+function Persist.startAutosave()
+    if Persist.autosaving or not writefile then return end
+    Persist.autosaving = true
+    task.spawn(function()
+        local lastCfg, lastSt
+        while mFrame:IsDescendantOf(game) do
+            local okC, encC = pcall(function() return HS:JSONEncode(Persist.buildConfig()) end)
+            if okC and encC ~= lastCfg then
+                lastCfg = encC
+                pcall(writefile, ConfigFileName, encC)
+            end
+            local okS, encS = pcall(function() return HS:JSONEncode(Persist.buildState()) end)
+            if okS and encS ~= lastSt then
+                lastSt = encS
+                pcall(writefile, StateFileName, encS)
+            end
+            task.wait(2)
+        end
+    end)
+end
+
 rstBtn.MouseButton1Click:Connect(function()
-    GraderAPI.LoadState({isG = false, items = {}})
-    TowerAPI.LoadState({isT = false, items = {}})
+    Persist.safe(GraderAPI.LoadState, {isG = false, items = {}})
+    Persist.safe(TowerAPI.LoadState, {isT = false, items = {}})
+    Persist.safe(OpenerAPI.LoadState, {isO = false, items = {}})
+    Persist.safe(FigurineAPI.LoadState, {isF = false, items = {}})
+    Persist.safe(setRaidState, false)
+    Persist.safe(Persist.loadRaid, {running = false, packs = {}})
     if SaveState then SaveState() end
     statusFileLbl.Text = "Account state & queue cleared!"
     task.delay(2, function() statusFileLbl.Text = "Auto-Sync Active (No manual save/load required)" end)
 end)
 
-SaveConfig = function()
-    if not writefile then return end
-    local cfg = {
-        userId = LP.UserId, accountName = LP.Name, uiScale = scInp.Text, afk = isAFK, fishDelay = fDelInp.Text,
-        event = { hk = hkDel.Text, hn = hnDel.Text, hm = hmUnits.Text, hw = hwDel.Text, hz = hzInp.Text, hs = hsInp.Text, htp = isTP },
-        grader = GraderAPI.GetConfig(), tower = TowerAPI.GetConfig()
-    }
-    pcall(function() writefile(ConfigFileName, HS:JSONEncode(cfg)) end)
-end
-
-SaveState = function()
-    if not writefile then return end
-    local st = {
-        userId = LP.UserId, accountName = LP.Name, fish = isFish, gems = isGems, hal = isHal, hud = isHudEnabled,
-        smelt = isSmelt, potion = isPotion, claim = isClaim, grader = GraderAPI.GetState(), tower = TowerAPI.GetState()
-    }
-    pcall(function() writefile(StateFileName, HS:JSONEncode(st)) end)
-end
-
 local function InitAccountFiles()
-    if readfile and isfile and isfile(ConfigFileName) then
-        local ok, cfg = pcall(function() return HS:JSONDecode(readfile(ConfigFileName)) end)
-        if ok and type(cfg) == "table" then
+    local function try(label, fn)
+        local ok, err = pcall(fn)
+        if not ok then warn("[ACC] restore " .. label .. " failed: " .. tostring(err)) end
+    end
+
+    local cfg = Persist.readJson(ConfigFileName)
+    local st = Persist.readJson(StateFileName)
+
+    setAfkState(true)
+
+    if cfg then
+        try("settings", function()
             if cfg.uiScale then scInp.Text = tostring(cfg.uiScale) uiScale.Scale = tonumber(scInp.Text) or 1 end
             if cfg.afk ~= nil then setAfkState(cfg.afk) end
             if cfg.fishDelay then fDelInp.Text = tostring(cfg.fishDelay) end
-            if type(cfg.event) == "table" then
-                if cfg.event.hk then hkDel.Text = tostring(cfg.event.hk) end
-                if cfg.event.hn then hnDel.Text = tostring(cfg.event.hn) end
-                if cfg.event.hm then hmUnits.Text = tostring(cfg.event.hm) end
-                if cfg.event.hw then hwDel.Text = tostring(cfg.event.hw) end
-                if cfg.event.hz then hzInp.Text = tostring(cfg.event.hz) end
-                if cfg.event.hs then hsInp.Text = tostring(cfg.event.hs) end
-                if cfg.event.htp ~= nil then isTP = cfg.event.htp htTPBtn.Text, htTPBtn.BackgroundColor3 = isTP and "[X] Smart Walk To Zones" or "[ ] Smart Walk To Zones", isTP and C3(40,200,120) or C3(50,50,50) end
-            end
-            if cfg.grader then GraderAPI.LoadConfig(cfg.grader) end
-            if cfg.tower then TowerAPI.LoadConfig(cfg.tower) end
-        end
-    else SaveConfig() end
+        end)
+        try("grader config", function() if cfg.grader then GraderAPI.LoadConfig(cfg.grader) end end)
+        try("tower config", function() if cfg.tower then TowerAPI.LoadConfig(cfg.tower) end end)
+        try("opener config", function() if cfg.opener then OpenerAPI.LoadConfig(cfg.opener) end end)
+        try("figurine config", function() if cfg.fig then FigurineAPI.LoadConfig(cfg.fig) end end)
+    end
 
-    if readfile and isfile and isfile(StateFileName) then
-        local ok, st = pcall(function() return HS:JSONDecode(readfile(StateFileName)) end)
-        if ok and type(st) == "table" then
-            if st.fish ~= nil and st.fish ~= isFish then setFishState(st.fish) end
-            if st.gems ~= nil and st.gems ~= isGems then setGemsState(st.gems) end
-            if st.hal ~= nil and st.hal ~= isHal then setHalState(st.hal) end
-            if st.hud ~= nil and st.hud ~= isHudEnabled then setHudState(st.hud) end
-            if st.smelt ~= nil and st.smelt ~= isSmelt then setSmeltState(st.smelt) end
-            if st.potion ~= nil and st.potion ~= isPotion then setPotionState(st.potion) end
-            if st.claim ~= nil and st.claim ~= isClaim then setClaimState(st.claim) end
-            if st.grader then GraderAPI.LoadState(st.grader) end
-            if st.tower then TowerAPI.LoadState(st.tower) end
+    if st then
+        try("fish", function() if st.fish ~= nil and st.fish ~= isFish then setFishState(st.fish) end end)
+        try("gems", function() if st.gems ~= nil and st.gems ~= isGems then setGemsState(st.gems) end end)
+        try("hud", function() if st.hud ~= nil and st.hud ~= isHudEnabled then setHudState(st.hud) end end)
+    end
+
+    task.spawn(function()
+        if st then
+            Persist.waitReady(25)
+            try("grader", function() if st.grader then GraderAPI.LoadState(st.grader) end end)
+            try("tower", function() if st.tower then TowerAPI.LoadState(st.tower) end end)
+            try("opener", function() if st.opener then OpenerAPI.LoadState(st.opener) end end)
+            try("figurines", function() if st.fig then FigurineAPI.LoadState(st.fig) end end)
+            try("raid", function() if st.raid then Persist.loadRaid(st.raid) end end)
+            task.wait(6)
+        else
+            task.wait(1)
         end
-    else SaveState() end
+        Persist.startAutosave()
+    end)
 end
 
 InitAccountFiles()
-print("ACC Master Suite Loaded Successfully!")
+print("ACC Master Suite (10-Tab Edition) Loaded Successfully!")
