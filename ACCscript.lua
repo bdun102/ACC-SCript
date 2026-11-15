@@ -20,6 +20,14 @@ pcall(function()
 end)
 
 local SCRIPT_URL = ""
+
+-- Infinite Yield (set getgenv().ACC_LOAD_IY = false before running to skip it)
+task.spawn(function()
+    local g = (getgenv and getgenv()) or _G
+    if g.ACC_LOAD_IY == false or g.ACC_IY_LOADED then return end
+    g.ACC_IY_LOADED = true
+    pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))() end)
+end)
 if not game:IsLoaded() then game.Loaded:Wait() end
 
 local Players = game:GetService("Players")
@@ -957,10 +965,14 @@ local function buildSpy(parent)
         local old
         local function handler(self, ...)
             local method = getnamecallmethod()
-            if env.ACC_SpyOn and not env.ACC_SpyBusy and (method == "FireServer" or method == "InvokeServer") and typeof(self) == "Instance" then
-                env.ACC_SpyBusy = true
-                pcall(env.ACC_SpyDispatch, self, method, { ... })
-                env.ACC_SpyBusy = false
+            if env.ACC_SpyOn and (method == "FireServer" or method == "InvokeServer") and typeof(self) == "Instance" then
+                -- capture only; do all work outside the hook (nested calls here can corrupt the namecall method)
+                local rem, mth, packed = self, method, table.pack(...)
+                task.defer(function()
+                    env.ACC_SpyBusy = true
+                    pcall(env.ACC_SpyDispatch, rem, mth, { table.unpack(packed, 1, packed.n) })
+                    env.ACC_SpyBusy = false
+                end)
             end
             return old(self, ...)
         end
@@ -2171,31 +2183,139 @@ local function bStarTrial(pFrame, sData, pcData)
             local want = d.maxed and 0.6 or 0
             if d.cBtn.TextTransparency ~= want then d.cBtn.TextTransparency = want end
             if d.maxed then maxedPacks = maxedPacks + 1 elseif total > 0 then needPacks = needPacks + 1 end
-            if d.iF.Visible then refreshPack(pN) end
+            refreshPack(pN)
         end
         return needPacks, maxedPacks, needCards
     end
 
     -- controls
     local sLbl = DS.status(rPnl, "Status: Idle", 1)
-    local scanBtn = DS.btn(rPnl, "Scan Packs", "info", 2, 36)
-    local selBtn = DS.btn(rPnl, "Scan & Select Unmaxed", "accent", 3, 36)
-    local scanLbl = DS.status(rPnl, "Scan: not run yet (maxed cards and packs are grayed out)", 4)
+    local nowLbl = DS.status(rPnl, "Current card: - (not running)", 2)
+    local shardLbl = DS.status(rPnl, "Shards: not scanned yet", 3)
+    local shardBtn = DS.btn(rPnl, "Scan Shards", "info", 4, 30)
+    local stBtn = DS.btn(rPnl, "Start Star Trials", "ok", 5, 34)
+    local exitBtn = DS.btn(rPnl, "Exit Trial", "danger", 6, 34)
+    local scanBtn = DS.btn(rPnl, "Scan Packs", "info", 7, 28)
+    local selBtn = DS.btn(rPnl, "Select Unmaxed", "accent", 8, 28)
+    local upBtn = DS.btn(rPnl, "Send Upgrade", "info", 9, 28)
+    local clearBtn = DS.btn(rPnl, "Clear Marks", nil, 10, 28)
+    local scanLbl = DS.status(rPnl, "Scan: not run yet (maxed cards and packs are grayed out)", 11)
     blockedNote = function(t) scanLbl.Text = t end
-    local diffOpts = { "Auto (what the next star needs)" }
+    local diffOpts = { "Auto (next star)" }
     for _, d in ipairs(TRIAL_DIFFICULTIES) do diffOpts[#diffOpts + 1] = d end
-    local diffInp = DS.dropdown(rPnl, "Difficulty", diffOpts, diffOpts[1], 5)
-    local concInp = DS.dropdown(rPnl, "Concurrent trials (experimental)", { "1", "2", "3", "4", "5" }, "1", 6)
-    local everyInp = DS.fullInp(rPnl, "Wait for the fight to begin before re-sending Start (seconds)", "20", 7, 30)
-    local skipInp = DS.dropdown(rPnl, "Skip cards at ★ or higher", { "Off", "1", "2", "3", "4", "5" }, "5", 8)
-    local giveInp = DS.dropdown(rPnl, "Mark card failed after (trials without a star)", { "1", "2", "3", "5", "10", "Unlimited" }, "1", 9)
-    local instBtn = DS.switch(rPnl, "[ ] Instant AttackDone (off = the game's own timing)", 10)
-    local tpBtn = DS.switch(rPnl, "[X] Block the game's teleport (stay where you are)", 11)
-    local uiBtn = DS.switch(rPnl, "[X] Hide the trial screen", 12)
-    local chalInp = DS.dropdown(rPnl, "Start each fight by", { "Remote call (no movement)", "Hop to enemy, then back" }, "Remote call (no movement)", 13)
-    local stBtn = DS.btn(rPnl, "Start Star Trials", "ok", 14, 40)
-    local upBtn = DS.btn(rPnl, "Send Star Upgrade (selected cards)", "info", 15, 36)
-    local clearBtn = DS.btn(rPnl, "Clear Done / Failed Marks", nil, 16, 34)
+    local diffInp = DS.dropdown(rPnl, "Difficulty", diffOpts, diffOpts[1], 12)
+    local concInp = DS.dropdown(rPnl, "Concurrent trials", { "1", "2", "3", "4", "5" }, "1", 13)
+    local everyInp = DS.fullInp(rPnl, "Re-send Start after (s)", "20", 14, 30)
+    local skipInp = DS.dropdown(rPnl, "Skip cards at ★ or higher", { "Off", "1", "2", "3", "4", "5" }, "5", 15)
+    local giveInp = DS.dropdown(rPnl, "Mark failed after (trials)", { "1", "2", "3", "5", "10", "Unlimited" }, "1", 16)
+    local stuckInp = DS.dropdown(rPnl, "Auto-exit stuck trial after (s)", { "Off", "30", "60", "120", "300" }, "60", 17)
+    local chalInp = DS.dropdown(rPnl, "Start each fight by", { "Remote call (no movement)", "Hop to enemy, then back" }, "Remote call (no movement)", 18)
+    local farmInp = DS.fullInp(rPnl, "Shard farm card name", "Luffy", 19, 30)
+    local tpBtn = DS.switch(rPnl, "[X] Block teleport", 21)
+    local uiBtn = DS.switch(rPnl, "[X] Hide trial screen", 22)
+    local visBtn = DS.switch(rPnl, "[X] No trial visuals", 23)
+    local closeBtn = DS.switch(rPnl, "[X] Keep my windows open", 24)
+    local farmBtn = DS.switch(rPnl, "[ ] Shard farm (Nightmare)", 25)
+
+    -- ===== compact layout: pairs side by side (stacked on a narrow screen), small buttons, 2-column switches =====
+    local function ctlBox(c)
+        if c.Parent == rPnl then return c end
+        if c.Parent.Parent == rPnl then return c.Parent end
+        return c.Parent.Parent
+    end
+    local function wide(f)
+        local w = f.AbsoluteSize.X / math.max((uiScale and uiScale.Scale) or 1, 0.1)
+        return w == 0 or w >= 440
+    end
+    local function slimLabel(box) local l = box:FindFirstChildOfClass("TextLabel") if l then l.TextSize, l.Size = 11, U2(1, 0, 0, 14) end end
+    local function newRow(order)
+        return DS.new("Frame", rPnl, { Size = U2(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = order })
+    end
+    local function pairRow(order, a, b)
+        local row = newRow(order)
+        local lay = Instance.new("UIListLayout")
+        lay.FillDirection, lay.SortOrder, lay.Padding = Enum.FillDirection.Horizontal, Enum.SortOrder.LayoutOrder, UDim.new(0, 8)
+        lay.Parent = row
+        local boxes = { ctlBox(a), ctlBox(b) }
+        for i, bx in ipairs(boxes) do bx.Parent, bx.LayoutOrder = row, i slimLabel(bx) end
+        local function adapt()
+            local w = wide(row)
+            lay.FillDirection = w and Enum.FillDirection.Horizontal or Enum.FillDirection.Vertical
+            for _, bx in ipairs(boxes) do bx.Size = w and U2(0.5, -4, 0, 0) or U2(1, 0, 0, 0) end
+        end
+        row:GetPropertyChangedSignal("AbsoluteSize"):Connect(adapt)
+        adapt()
+    end
+    local function gridRow(order, cols, cellH, ...)
+        local row = newRow(order)
+        local g = Instance.new("UIGridLayout")
+        g.SortOrder, g.CellPadding = Enum.SortOrder.LayoutOrder, U2(0, 6, 0, 6)
+        g.Parent = row
+        for i, c in ipairs({ ... }) do
+            local bx = ctlBox(c)
+            bx.Parent, bx.LayoutOrder = row, i
+            if bx:IsA("TextButton") then bx.TextSize = 11 end
+        end
+        local function adapt()
+            local n = wide(row) and cols or math.max(1, math.floor(cols / 2))
+            g.CellSize = U2(1 / n, -math.ceil(6 * (n - 1) / n), 0, cellH)
+        end
+        row:GetPropertyChangedSignal("AbsoluteSize"):Connect(adapt)
+        adapt()
+    end
+    for _, d in ipairs({ diffInp, concInp, skipInp, giveInp, stuckInp, chalInp }) do d.Parent.Size = U2(1, 0, 0, 30) end
+    everyInp.Size, farmInp.Size = U2(1, 0, 0, 30), U2(1, 0, 0, 30)
+    -- shards line + its button
+    do
+        local row = newRow(3)
+        local lay = Instance.new("UIListLayout")
+        lay.FillDirection, lay.SortOrder, lay.Padding, lay.VerticalAlignment = Enum.FillDirection.Horizontal, Enum.SortOrder.LayoutOrder, UDim.new(0, 6), Enum.VerticalAlignment.Top
+        lay.Parent = row
+        shardLbl.Parent, shardLbl.LayoutOrder, shardLbl.Size = row, 1, U2(1, -86, 0, 30)
+        shardBtn.Parent, shardBtn.LayoutOrder, shardBtn.Size, shardBtn.TextSize = row, 2, U2(0, 80, 0, 30), 11
+    end
+    -- Start / Exit
+    do
+        local row = DS.new("Frame", rPnl, { Size = U2(1, 0, 0, 34), LayoutOrder = 4 })
+        local lay = Instance.new("UIListLayout")
+        lay.FillDirection, lay.SortOrder, lay.Padding = Enum.FillDirection.Horizontal, Enum.SortOrder.LayoutOrder, UDim.new(0, 6)
+        lay.Parent = row
+        stBtn.Parent, stBtn.LayoutOrder, stBtn.Size = row, 1, U2(0.68, -3, 1, 0)
+        exitBtn.Parent, exitBtn.LayoutOrder, exitBtn.Size = row, 2, U2(0.32, -3, 1, 0)
+    end
+    gridRow(5, 4, 28, scanBtn, selBtn, upBtn, clearBtn)
+    pairRow(12, diffInp, concInp)
+    pairRow(13, everyInp, skipInp)
+    pairRow(14, giveInp, stuckInp)
+    -- chalInp gets the row to itself next to nothing: keep it half width
+    do
+        local row = newRow(15)
+        local lay = Instance.new("UIListLayout")
+        lay.FillDirection, lay.SortOrder, lay.Padding = Enum.FillDirection.Horizontal, Enum.SortOrder.LayoutOrder, UDim.new(0, 8)
+        lay.Parent = row
+        local cb = ctlBox(chalInp)
+        cb.Parent, cb.LayoutOrder = row, 1 slimLabel(cb)
+        local function adapt() local w = wide(row) cb.Size = w and U2(0.5, -4, 0, 0) or U2(1, 0, 0, 0) lay.FillDirection = w and Enum.FillDirection.Horizontal or Enum.FillDirection.Vertical end
+        row:GetPropertyChangedSignal("AbsoluteSize"):Connect(adapt) adapt()
+    end
+    gridRow(16, 2, 30, tpBtn, uiBtn, visBtn, closeBtn)
+    -- shard farm: its switch and the card name box together, name defaults to Luffy
+    do
+        local row = newRow(17)
+        local lay = Instance.new("UIListLayout")
+        lay.FillDirection, lay.SortOrder, lay.Padding, lay.VerticalAlignment = Enum.FillDirection.Horizontal, Enum.SortOrder.LayoutOrder, UDim.new(0, 8), Enum.VerticalAlignment.Bottom
+        lay.Parent = row
+        local fb, sb = ctlBox(farmInp), ctlBox(farmBtn)
+        fb.Parent, fb.LayoutOrder = row, 1 slimLabel(fb)
+        sb.Parent, sb.LayoutOrder = row, 2
+        local function adapt()
+            local w = wide(row)
+            lay.FillDirection = w and Enum.FillDirection.Horizontal or Enum.FillDirection.Vertical
+            fb.Size = w and U2(0.5, -4, 0, 0) or U2(1, 0, 0, 0)
+            sb.Size = w and U2(0.5, -4, 0, 30) or U2(1, 0, 0, 30)
+        end
+        row:GetPropertyChangedSignal("AbsoluteSize"):Connect(adapt) adapt()
+    end
     everyInp.FocusLost:Connect(function() if SaveConfig then SaveConfig() end end)
 
     local function scanText(np, mp, nc)
@@ -2226,9 +2346,117 @@ local function bStarTrial(pFrame, sData, pcData)
     end)
 
     local trialRem = getRemote("StarTrial")
-    local running, runId, instant = false, 0, false
+    local running, runId = false, 0
     local noTp, hideUI, latency, gotFirst = true, true, nil, {}
+    local noVis, noClose = true, true
+    local lastTrialEvt, lastEvtAt, unanswered = -1e9, os.clock(), 0
+    local forceExit
     local trialOn, battle, curCard, chalAt, chalN = false, false, nil, 0, 0
+    -- ===== shards (star currency) and shard farm =====
+    local farm, farmRuns, farmGain, farmBase, farmNextAt = false, 0, 0, nil, 0
+    local function fmtN(n)
+        local str, r = tostring(math.floor(tonumber(n) or 0))
+        repeat str, r = str:gsub("^(-?%d+)(%d%d%d)", "%1,%2") until r == 0
+        return str
+    end
+    -- every star currency in the inventory (Shards, tickets, ...) plus anything named *shard* in other collections
+    local function readCurrencies()
+        local have = {}
+        local cur = getLiveData("StarCurrency")
+        if type(cur) == "table" then for k, v in pairs(cur) do if type(v) == "number" then have[k] = v end end end
+        if StarCfg and type(StarCfg.CurrencyList) == "table" then
+            for _, k in ipairs(StarCfg.CurrencyList) do
+                if have[k] == nil then local v = tonumber(getLiveData("StarCurrency", k)) if v then have[k] = v end end
+            end
+        end
+        if have.Shards == nil then local v = tonumber(getLiveData("StarCurrency", "Shards")) if v then have.Shards = v end end
+        for _, col in ipairs({ "Consumables", "Currency", "Items" }) do
+            local t = getLiveData(col)
+            if type(t) == "table" then
+                for k, v in pairs(t) do
+                    if type(k) == "string" and type(v) == "number" and have[k] == nil and string.find(string.lower(k), "shard", 1, true) then have[k] = v end
+                end
+            end
+        end
+        return have
+    end
+    local function updateShards()
+        local have = readCurrencies()
+        local keys = {}
+        for k in pairs(have) do if k ~= "Shards" then keys[#keys + 1] = k end end
+        table.sort(keys)
+        local parts = { "Shards: " .. (have.Shards and fmtN(have.Shards) or "none found") }
+        for _, k in ipairs(keys) do parts[#parts + 1] = k .. ": " .. fmtN(have[k]) end
+        local txt = table.concat(parts, " | ")
+        if farmBase and have.Shards and (farm or farmRuns > 0) then
+            txt = txt .. string.format("\nShard farm: %d runs | %s%s shards this farm (%s from trial rewards)",
+                farmRuns, have.Shards - farmBase >= 0 and "+" or "", fmtN(have.Shards - farmBase), fmtN(farmGain))
+        end
+        if shardLbl.Text ~= txt then shardLbl.Text = txt end
+        return have
+    end
+    local function resolveFarmCard()
+        local want = string.lower((farmInp.Text or ""):gsub("^%s+", ""):gsub("%s+$", ""))
+        if want == "" then return nil end
+        for _, pD in ipairs(sData) do
+            for _, iN in ipairs(pcData[pD.Name] or {}) do
+                if string.lower(iN) == want and infoOf(iN) then return iN end
+            end
+        end
+        return nil
+    end
+    local curDiff
+    local function cardLine(c)
+        local i = infoOf(c)
+        local t = c
+        if i then
+            t = t .. " | grade " .. (i.grade ~= "" and i.grade or "?") .. " | ★" .. i.star
+            if i.mut ~= "Regular" then t = t .. " | " .. i.mut end
+            if i.trait ~= "" then t = t .. " | " .. i.trait end
+        end
+        return t
+    end
+    -- the "Current card" line: card, grade, stars, trial difficulty and what its next star still needs
+    local function updateNow(live)
+        local names = live
+        if (not names or #names == 0) and trialOn and curCard then names = { curCard } end
+        if not names or #names == 0 then
+            nowLbl.Text = running and "Current card: waiting for the next trial..." or "Current card: - (not running)"
+            return
+        end
+        local parts = {}
+        for _, c in ipairs(names) do
+            local p = cardLine(c)
+            local r = nextReq(c)
+            if r then
+                if r.ready then p = p .. " | next star: ready"
+                elseif r.diff then p = p .. " | next star needs " .. r.diff
+                elseif r.short then p = p .. " | next star needs " .. tostring(r.short) end
+            end
+            parts[#parts + 1] = p
+        end
+        nowLbl.Text = "Current card: " .. table.concat(parts, "   +   ") .. (curDiff and (" | trial: " .. tostring(curDiff)) or "")
+    end
+    -- re-read every card (stars, grade, mutation, trait, maxed state) in every pack, not just the open ones
+    local function refreshAll()
+        local np, mp, nc = scanAll()
+        for _, pD in ipairs(sData) do
+            local pN = pD.Name
+            local d = SData[pN]
+            if d then
+                for iN, on in pairs(d.items) do
+                    if on then
+                        local i = infoOf(iN)
+                        if i and i.star >= MAX_STAR then setItem(pN, iN, false) end
+                    end
+                end
+                paintPack(pN)
+            end
+        end
+        scanLbl.Text = scanText(np, mp, nc)
+        updateNow()
+        pcall(updateShards)
+    end
     -- event log, written to ACC_StarTrial_Log.txt while running so a bad run can be inspected
     local slog, t0log = {}, os.clock()
     local function L(msg)
@@ -2323,19 +2551,35 @@ local function bStarTrial(pFrame, sData, pcData)
             if limit > 0 and tries[card] >= limit then markStatus(card, "failed") end
         end
         if SaveState then SaveState() end
+        pcall(refreshAll)
     end
 
     if trialRem then
         trialRem.OnClientEvent:Connect(function(action, a, b)
             local t = os.clock()
+            lastEvtAt = t
             L("IN  " .. tostring(action) .. " " .. short(a) .. " " .. short(b))
+            if action == "StartTrial" or action == "Results" then lastTrialEvt = t end
             if action == "StartTrial" then
                 trialOn, battle, chalAt = true, false, 0
+                unanswered = 0
+                if type(b) == "string" then curDiff = b end
+                updateNow()
             elseif action == "Results" then
                 -- the trial is over: the card that was fighting counts as finished right now (no 8s wait)
                 trialOn, battle = false, false
                 if curCard then activeAt[curCard] = t - ACTIVE_FOR - 1 wasActive[curCard] = true end
-                if hideUI or noTp then
+                if farm then
+                    farmRuns = farmRuns + 1
+                    if type(a) == "table" then farmGain = farmGain + (tonumber(a.Shards) or 0) end
+                    farmNextAt = t + 1.5
+                    local fc = resolveFarmCard()
+                    if fc then startedAt[fc] = nil end
+                end
+                -- refresh every card once the new completion has replicated, and again a little later
+                task.delay(1.5, function() pcall(refreshAll) end)
+                task.delay(5, function() pcall(refreshAll) end)
+                if (hideUI or noTp) and not noVis then
                     task.delay(0.4, function()
                         local okH, H = pcall(function() return require(RS.Client.UI.StarTrialHandler) end)
                         if okH and type(H) == "table" and H.ContinueClicked then pcall(H.ContinueClicked) end
@@ -2353,11 +2597,8 @@ local function bStarTrial(pFrame, sData, pcData)
                     end
                 end
                 fightT = t
+                pcall(updateNow)
             elseif action == "Attack" then
-                if running and instant then
-                    L("OUT AttackDone (instant) " .. short(a))
-                    pcall(function() trialRem:FireServer("AttackDone", a) end)
-                end
             elseif action == "EnemyDefeated" then
                 battle = false
                 if fightT then
@@ -2375,6 +2616,7 @@ local function bStarTrial(pFrame, sData, pcData)
                     tries[a] = 0
                     evoAt[a] = t
                 end
+                task.delay(0.5, function() pcall(refreshAll) end)
             end
             if not KNOWN[action] then lastOther = tostring(action) end
         end)
@@ -2404,11 +2646,17 @@ local function bStarTrial(pFrame, sData, pcData)
     end
 
     local function pickDifficulty(card)
+        if farm then return "Nightmare" end
         if string.sub(diffInp.Text, 1, 4) ~= "Auto" then return diffInp.Text end
         local r = nextReq(card)
         return (r and (r.diff or r.top)) or "Hard"
     end
     local function startTrial(card)
+        if unanswered >= 3 and forceExit then
+            forceExit("no answer to " .. unanswered .. " Start requests")
+            farmNextAt = os.clock() + 2
+        end
+        unanswered = unanswered + 1
         startedAt[card] = os.clock()
         sent = sent + 1
         local diff = pickDifficulty(card)
@@ -2451,6 +2699,110 @@ local function bStarTrial(pFrame, sData, pcData)
         end
         return true
     end
+    -- Disable every visual of the trial. The game's remote handler looks each event up in the StarTrialHandler table when it fires,
+    -- so swapping these fields stops the trial frame, the dark overlay, ButtonHandler.OnClick/TurnOffFrame (which closes your other
+    -- windows on every start / fight / continue), the tweens and the sounds. The server still gets the one thing the game's Attack
+    -- code sends: AttackDone, after the same delay the animation would have taken.
+    local origVis
+    local function applyNoVis(on)
+        local H = getHandler()
+        if not H then L("no-visuals: StarTrialHandler module not reachable") return false end
+        if on and not origVis then
+            origVis = { StartTrial = H.StartTrial, StartFight = H.StartFight, Attack = H.Attack, EnemyDefeated = H.EnemyDefeated, Results = H.Results, ToggleFrames = H.ToggleFrames, ShowFrame = H.ShowFrame, HidePlayers = H.HidePlayers }
+            H.StartTrial = function() end
+            H.StartFight = function() end
+            H.EnemyDefeated = function() end
+            H.Results = function() end
+            H.ToggleFrames = function() end
+            H.ShowFrame = function() end
+            H.HidePlayers = function() end
+            H.Attack = function(slot)
+                local bs = tonumber(getLiveData("StarUpgrades", "BattleSpeed")) or 0
+                local buff = StarCfg and StarCfg.Upgrades and StarCfg.Upgrades.BattleSpeed and tonumber(StarCfg.Upgrades.BattleSpeed.Buff) or 0
+                local wait = 0.9 / (1 + bs * buff)
+                task.delay(wait, function() pcall(function() trialRem:FireServer("AttackDone", slot) end) end)
+            end
+            L("no-visuals: trial UI, overlay, tweens and sounds are now disabled")
+        elseif not on and origVis then
+            for k, v in pairs(origVis) do H[k] = v end
+            origVis = nil
+            L("no-visuals: game visuals restored")
+        end
+        return true
+    end
+    -- The game closes your open windows through ButtonHandler.OnClick(nil, "StarTrial") / TurnOffFrame() and flashes the screen
+    -- through GUIDirectoryHandler.QuickTransition. Those are shared with every other window, so they are only skipped when the call
+    -- comes from the star trial code (getcallingscript), or, without that function, within 1.5s of a trial start / end.
+    local gameMods, origClose = {}, nil
+    local function findMod(name)
+        if gameMods[name] ~= nil then return gameMods[name] or nil end
+        local found
+        pcall(function()
+            for _, d in ipairs(RS.Client:GetDescendants()) do
+                if d.Name == name and d:IsA("ModuleScript") then
+                    local ok, t = pcall(require, d)
+                    if ok and type(t) == "table" then found = t break end
+                end
+            end
+        end)
+        gameMods[name] = found or false
+        return found
+    end
+    local function fromTrial()
+        if not running then return false end
+        if type(getcallingscript) == "function" then
+            local ok, cs = pcall(getcallingscript)
+            if ok and cs and cs.Name == "StarTrialHandler" then return true end
+            if ok and cs then return false end
+        end
+        return os.clock() - lastTrialEvt < 1.5
+    end
+    local function applyNoClose(on)
+        if on and not origClose then
+            origClose = {}
+            local BH, GD = findMod("ButtonHandler"), findMod("GUIDirectoryHandler")
+            if BH and type(BH.OnClick) == "function" then
+                local o = BH.OnClick origClose[#origClose + 1] = { BH, "OnClick", o }
+                BH.OnClick = function(...) if select(2, ...) == "StarTrial" and running then return end return o(...) end
+            end
+            if BH and type(BH.TurnOffFrame) == "function" then
+                local o = BH.TurnOffFrame origClose[#origClose + 1] = { BH, "TurnOffFrame", o }
+                BH.TurnOffFrame = function(...) if fromTrial() then return end return o(...) end
+            end
+            if GD and type(GD.QuickTransition) == "function" then
+                local o = GD.QuickTransition origClose[#origClose + 1] = { GD, "QuickTransition", o }
+                GD.QuickTransition = function(...) if fromTrial() then return end return o(...) end
+            end
+            L("no-close: " .. #origClose .. " window-closing calls are now guarded")
+        elseif not on and origClose then
+            for _, e in ipairs(origClose) do e[1][e[2]] = e[3] end
+            origClose = nil
+            L("no-close: window-closing calls restored")
+        end
+    end
+    -- the game's own Exit button: AFK off, auto queue off, "Exit" to the server, then clear every local trial flag
+    forceExit = function(why)
+        L("OUT Exit (" .. tostring(why) .. ")")
+        local H = getHandler()
+        if H then H.AFK = false end
+        pcall(function() trialRem:FireServer("AutoQueue", false, {}) end)
+        pcall(function() trialRem:FireServer("AFK", false) end)
+        pcall(function() trialRem:FireServer("Exit") end)
+        pcall(function() local TT = require(RS.Client.Core.TrackTargets) if TT and TT.Exit then TT.Exit() end end)
+        trialOn, battle, unanswered = false, false, 0
+        for k in pairs(activeAt) do activeAt[k] = nil end
+        for k in pairs(startedAt) do startedAt[k] = nil end
+        for k in pairs(wasActive) do wasActive[k] = nil end
+        if H then
+            H.InTrial, H.InBattle, H.StartTime = false, false, nil
+            pcall(H.ShowPlayers)
+            if not origVis then pcall(H.ContinueClicked) end -- hides a leftover trial / results frame
+        end
+        lastEvtAt = os.clock()
+        pcall(updateNow)
+        saveLog()
+    end
+    local function stuckSecs() return tonumber(string.match(stuckInp.Text or "", "%d+")) or 0 end
     local function nextEnemy()
         local tag = tostring(LP.UserId) .. "-StarTrialEnemy"
         local bestId, bestInst
@@ -2513,11 +2865,15 @@ local function bStarTrial(pFrame, sData, pcData)
         if on and not trialRem then stBtn.Text = "ERR: StarTrial Remote Missing" return end
         local was = running
         running = on and true or false
-        stBtn.Text = running and "Stop Star Trials" or "Start Star Trials"
+        stBtn.Text = running and "Stop Star Trials" or (farm and "Start Shard Farm" or "Start Star Trials")
+        if running and updateNow then pcall(updateNow) end
         stBtn.BackgroundColor3 = running and C3(200, 40, 40) or C3(40, 200, 120)
         if not running then
             sLbl.Text = "Status: Idle"
+            if updateNow then pcall(updateNow) end
             applyNoTp(false)
+            applyNoVis(false)
+            applyNoClose(false)
             trialOn, battle = false, false
             if was and trialRem then
                 L("OUT AutoQueue false (stopped)")
@@ -2531,15 +2887,22 @@ local function bStarTrial(pFrame, sData, pcData)
         tries, wasActive = {}, {}
         local lastSaved = 0
         startedAt, activeAt, verifying = {}, {}, {}
-        L("---- run started (difficulty " .. tostring(diffInp.Text) .. ", instant " .. tostring(instant) .. ", noTp " .. tostring(noTp) .. ", hideUI " .. tostring(hideUI) .. ", " .. tostring(chalInp.Text) .. ") ----")
+        if farm then farmRuns, farmGain = 0, 0 local h = readCurrencies() farmBase = h.Shards end
+        L("---- run started (difficulty " .. tostring(diffInp.Text) .. ", noTp " .. tostring(noTp) .. ", hideUI " .. tostring(hideUI) .. ", " .. tostring(chalInp.Text) .. ") ----")
         applyNoTp(noTp)
+        applyNoVis(noVis)
+        applyNoClose(noClose)
         startDriver(run)
         task.spawn(function()
             -- cash in any trial that was already won but not upgraded yet
-            cashIn(queue())
+            if not farm then cashIn(queue()) end
             while running and run == runId and mFrame:IsDescendantOf(game) do
                 local now = os.clock()
                 local list = queue()
+                if farm then
+                    local fc = resolveFarmCard()
+                    list = fc and { fc } or {}
+                end
                 local want = math.clamp(math.floor(tonumber(concInp.Text) or 1), 1, 5)
                 local every = math.max(tonumber(everyInp.Text) or 20, 1)
                 local busy, idle, live = 0, {}, {}
@@ -2550,7 +2913,7 @@ local function bStarTrial(pFrame, sData, pcData)
                     elseif wasActive[c] then
                         -- the trial just ended: try the star upgrade, count it as an attempt (an EvolutionSuccess resets the count)
                         wasActive[c] = false
-                        task.spawn(verifyAfterTrial, c)
+                        if not farm then task.spawn(verifyAfterTrial, c) end
                     end
                     if isActive then busy = busy + 1 live[#live + 1] = c
                     elseif verifying[c] or isPending then busy = busy + 1
@@ -2558,9 +2921,15 @@ local function bStarTrial(pFrame, sData, pcData)
                 end
                 table.sort(idle, function(x, y) if x.t ~= y.t then return x.t < y.t end return x.i < y.i end)
                 for _, e in ipairs(idle) do
-                    if busy >= want then break end
+                    if busy >= want or (farm and now < farmNextAt) then break end
                     startTrial(e.c)
                     busy = busy + 1
+                end
+                pcall(updateNow, live)
+                local sa = stuckSecs()
+                if sa > 0 and trialOn and os.clock() - lastEvtAt > sa then
+                    forceExit("no trial events for " .. sa .. "s")
+                    farmNextAt = os.clock() + 2
                 end
                 if now - (lastSaved or 0) >= 5 then lastSaved = now saveLog() end
                 local avg = 0
@@ -2577,26 +2946,52 @@ local function bStarTrial(pFrame, sData, pcData)
                 end
                 if latency then sLbl.Text = sLbl.Text .. string.format(" | start to fight %.1fs", latency) end
                 if lastOther then sLbl.Text = sLbl.Text .. " | other event: " .. lastOther end
+                if farm then
+                    if list[1] then
+                        sLbl.Text = string.format("Shard farm | %s on Nightmare | runs %d | fights %d | avg fight %.2fs", list[1], farmRuns, fights, avg)
+                    else
+                        sLbl.Text = "Shard farm | card '" .. tostring(farmInp.Text) .. "' not found in your cards (check the spelling)"
+                    end
+                end
                 task.wait(0.5)
             end
         end)
     end
 
-    instBtn.MouseButton1Click:Connect(function()
-        instant = not instant
-        instBtn.Text = (instant and "[X] " or "[ ] ") .. "Instant AttackDone (off = the game's own timing)"
-        instBtn.BackgroundColor3 = instant and C3(40, 200, 120) or C3(50, 50, 50)
-        if SaveConfig then SaveConfig() end
-    end)
     local function paintSwitch(b, on, text)
         b.Text = (on and "[X] " or "[ ] ") .. text
         b.BackgroundColor3 = on and C3(40, 200, 120) or C3(50, 50, 50)
     end
-    local TP_TXT, UI_TXT = "Block the game's teleport (stay where you are)", "Hide the trial screen"
+    local TP_TXT, UI_TXT = "Block teleport", "Hide trial screen"
+    local FARM_TXT = "Shard farm (Nightmare)"
+    local function setFarm(on)
+        farm = on and true or false
+        paintSwitch(farmBtn, farm, FARM_TXT)
+        if not running then stBtn.Text = farm and "Start Shard Farm" or "Start Star Trials" end
+        if farm then local h = readCurrencies() farmBase = h.Shards farmRuns, farmGain = 0, 0 end
+        pcall(updateShards)
+    end
+    farmBtn.MouseButton1Click:Connect(function() setFarm(not farm) if SaveConfig then SaveConfig() end end)
+    farmInp.FocusLost:Connect(function() if SaveConfig then SaveConfig() end end)
+    shardBtn.MouseButton1Click:Connect(function() pcall(updateShards) end)
     tpBtn.MouseButton1Click:Connect(function()
         noTp = not noTp
         paintSwitch(tpBtn, noTp, TP_TXT)
         if running then applyNoTp(noTp) end
+        if SaveConfig then SaveConfig() end
+    end)
+    local VIS_TXT = "No trial visuals"
+    visBtn.MouseButton1Click:Connect(function()
+        noVis = not noVis
+        paintSwitch(visBtn, noVis, VIS_TXT)
+        if running then applyNoVis(noVis) end
+        if SaveConfig then SaveConfig() end
+    end)
+    local CLOSE_TXT = "Keep my windows open"
+    closeBtn.MouseButton1Click:Connect(function()
+        noClose = not noClose
+        paintSwitch(closeBtn, noClose, CLOSE_TXT)
+        if running then applyNoClose(noClose) end
         if SaveConfig then SaveConfig() end
     end)
     uiBtn.MouseButton1Click:Connect(function()
@@ -2605,6 +3000,11 @@ local function bStarTrial(pFrame, sData, pcData)
         if SaveConfig then SaveConfig() end
     end)
     stBtn.MouseButton1Click:Connect(function() setRunning(not running) if SaveState then SaveState() end end)
+    exitBtn.MouseButton1Click:Connect(function()
+        if running then setRunning(false) end
+        forceExit("Exit button")
+        if SaveState then SaveState() end
+    end)
     upBtn.MouseButton1Click:Connect(function()
         task.spawn(function()
             local list = queue()
@@ -2627,12 +3027,12 @@ local function bStarTrial(pFrame, sData, pcData)
     task.spawn(function()
         while mFrame:IsDescendantOf(game) do
             task.wait(4)
-            if pFrame.Visible then pcall(scanAll) end
+            if pFrame.Visible then pcall(scanAll) pcall(updateShards) end
         end
     end)
 
     StarAPI.GetConfig = function()
-        return { diff = diffInp.Text, conc = concInp.Text, wait = everyInp.Text, skip = skipInp.Text, fails = giveInp.Text, instantAtk = instant, noTp = noTp, hideUI = hideUI, chal = chalInp.Text }
+        return { diff = diffInp.Text, conc = concInp.Text, wait = everyInp.Text, skip = skipInp.Text, fails = giveInp.Text, noTp = noTp, hideUI = hideUI, noVis = noVis, noClose = noClose, chal = chalInp.Text, stuck = stuckInp.Text, farm = farm, farmCard = farmInp.Text }
     end
     StarAPI.LoadConfig = function(c)
         if not c then return end
@@ -2641,22 +3041,30 @@ local function bStarTrial(pFrame, sData, pcData)
         if c.wait then everyInp.Text = tostring(c.wait) end
         if c.skip then skipInp.Text = (tostring(c.skip) == "0") and "Off" or tostring(c.skip) end
         if c.fails then giveInp.Text = tostring(c.fails) end
-        if c.instantAtk ~= nil then
-            instant = c.instantAtk
-            instBtn.Text = (instant and "[X] " or "[ ] ") .. "Instant AttackDone (off = the game's own timing)"
-            instBtn.BackgroundColor3 = instant and C3(40, 200, 120) or C3(50, 50, 50)
-        end
         if c.noTp ~= nil then
             noTp = c.noTp
-            tpBtn.Text = (noTp and "[X] " or "[ ] ") .. "Block the game's teleport (stay where you are)"
+            tpBtn.Text = (noTp and "[X] " or "[ ] ") .. "Block teleport"
             tpBtn.BackgroundColor3 = noTp and C3(40, 200, 120) or C3(50, 50, 50)
         end
         if c.hideUI ~= nil then
             hideUI = c.hideUI
-            uiBtn.Text = (hideUI and "[X] " or "[ ] ") .. "Hide the trial screen"
+            uiBtn.Text = (hideUI and "[X] " or "[ ] ") .. "Hide trial screen"
             uiBtn.BackgroundColor3 = hideUI and C3(40, 200, 120) or C3(50, 50, 50)
         end
+        if c.noVis ~= nil then
+            noVis = c.noVis
+            visBtn.Text = (noVis and "[X] " or "[ ] ") .. "No trial visuals"
+            visBtn.BackgroundColor3 = noVis and C3(40, 200, 120) or C3(50, 50, 50)
+        end
+        if c.noClose ~= nil then
+            noClose = c.noClose
+            closeBtn.Text = (noClose and "[X] " or "[ ] ") .. "Keep my windows open"
+            closeBtn.BackgroundColor3 = noClose and C3(40, 200, 120) or C3(50, 50, 50)
+        end
         if c.chal then chalInp.Text = tostring(c.chal) end
+        if c.stuck then stuckInp.Text = tostring(c.stuck) end
+        if c.farmCard and c.farmCard ~= "" then farmInp.Text = tostring(c.farmCard) end
+        if c.farm ~= nil then setFarm(c.farm) end
     end
     StarAPI.GetState = function()
         local names, seen = {}, {}
