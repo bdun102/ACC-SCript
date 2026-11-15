@@ -1,5 +1,5 @@
 -- =========================================================================
--- ACC MASTER SUITE: 10-TAB STREAMLINED EDITION (UPGRADED OPENER & GRADER)
+-- ACC MASTER SUITE: 11-TAB EDITION (UPGRADED OPENER + MARKET BUYALL) - REDESIGNED UI
 -- =========================================================================
 
 pcall(function()
@@ -11,7 +11,6 @@ pcall(function()
 end)
 
 local SCRIPT_URL = ""
-local LOAD_EXTERNAL_HUBS = true
 if not game:IsLoaded() then game.Loaded:Wait() end
 
 local Players = game:GetService("Players")
@@ -23,9 +22,381 @@ local HS = game:GetService("HttpService")
 local VU = game:GetService("VirtualUser")
 local VIM = game:GetService("VirtualInputManager")
 local U2 = UDim2.new
-local C3 = Color3.fromRGB
 local F_GB = Enum.Font.GothamBold
 local F_GM = Enum.Font.GothamMedium
+
+-- ==========================================
+-- 0. DESIGN SYSTEM (theme, widgets, skin)
+-- ==========================================
+local TS = game:GetService("TweenService")
+local rgb = Color3.fromRGB
+local T = {
+    bg = rgb(13, 14, 20), surface = rgb(20, 22, 31), surface2 = rgb(27, 30, 42), surface3 = rgb(37, 41, 57),
+    input = rgb(15, 17, 25), stroke = rgb(46, 51, 71),
+    text = rgb(236, 238, 246), text2 = rgb(188, 194, 212), text3 = rgb(130, 137, 160), text4 = rgb(88, 94, 114),
+    accent = rgb(99, 102, 241), accentDim = rgb(52, 55, 128), amber = rgb(251, 191, 36),
+    ok = rgb(16, 160, 112), ok2 = rgb(52, 211, 153), danger = rgb(222, 64, 84), info = rgb(59, 130, 246),
+    off = rgb(62, 68, 92), white = rgb(255, 255, 255),
+}
+
+-- Legacy colours still written by the automation logic are mapped onto the new palette,
+-- so every dynamic state change (running / stopped / selected) picks up the new theme.
+local C3
+do
+    local LEGACY = {
+        ["40,200,120"] = T.ok, ["40,220,130"] = T.ok2, ["200,40,40"] = T.danger, ["50,50,50"] = T.surface3,
+        ["40,40,40"] = T.surface3, ["40,120,200"] = T.info,
+        ["200,200,200"] = T.text2, ["210,210,210"] = T.text2, ["150,150,150"] = T.text3, ["100,100,100"] = T.text4,
+    }
+    C3 = function(r, g, b) return LEGACY[r .. "," .. g .. "," .. b] or rgb(r, g, b) end
+end
+
+local uiScale -- assigned when the main window is built
+local DS = {}
+
+-- ---------- primitives ----------
+function DS.new(class, parent, props)
+    local o = Instance.new(class)
+    if o:IsA("GuiObject") then
+        o.BorderSizePixel = 0
+        if not (props and (props.BackgroundColor3 or props.BackgroundTransparency)) then o.BackgroundTransparency = 1 end
+    end
+    if o:IsA("TextLabel") or o:IsA("TextButton") or o:IsA("TextBox") then
+        o.Font, o.TextSize, o.TextColor3 = F_GM, 13, T.text
+    end
+    for key, value in pairs(props or {}) do o[key] = value end
+    o.Parent = parent
+    return o
+end
+
+function DS.corner(o, r)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, r or 8)
+    c.Parent = o
+    return c
+end
+
+function DS.stroke(o, color, thickness)
+    local s = Instance.new("UIStroke")
+    s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    s.Color, s.Thickness = color or T.stroke, thickness or 1
+    s.Parent = o
+    return s
+end
+
+function DS.pad(o, l, t, r, b)
+    local p = Instance.new("UIPadding")
+    p.PaddingLeft, p.PaddingTop, p.PaddingRight, p.PaddingBottom = UDim.new(0, l or 0), UDim.new(0, t or 0), UDim.new(0, r or 0), UDim.new(0, b or 0)
+    p.Parent = o
+    return p
+end
+
+function DS.vlist(o, gap)
+    local l = Instance.new("UIListLayout")
+    l.SortOrder, l.Padding = Enum.SortOrder.LayoutOrder, UDim.new(0, gap or 6)
+    l.Parent = o
+    return l
+end
+
+-- drag by a handle (title bar), works for mouse and touch and never fights scrolling lists
+function DS.drag(handle, target)
+    local dragging, origin, startPos = false, nil, nil
+    handle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging, origin, startPos = true, input.Position, target.Position
+            target:SetAttribute("wasDragged", false)
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
+        end
+    end)
+    UIS.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local d = input.Position - origin
+            if d.Magnitude > 5 then target:SetAttribute("wasDragged", true) end
+            target.Position = U2(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+        end
+    end)
+end
+
+-- ---------- text skin: turns the logic's "[X] Name [A]" strings into designed rows ----------
+local GRADE_COLORS = {
+    UR = "#fbbf24", SR = "#f472b6", SS = "#c084fc", ["S+"] = "#fb923c", S = "#fb923c",
+    A = "#34d399", B = "#60a5fa", C = "#9ca3af", D = "#9ca3af", E = "#6b7280", F = "#6b7280",
+}
+local function esc(s) return (tostring(s):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")) end
+local function span(s, color) return "<font color=\"" .. color .. "\">" .. esc(s) .. "</font>" end
+local function badge(s, color) return "<b>" .. span(s, color) .. "</b>" end
+
+local function parseCheck(text)
+    local i, j = string.find(text, "%[[X ]%]")
+    if not i or i > 10 then return nil end
+    local on = string.sub(text, i + 1, i + 1) == "X"
+    local rest = string.match(string.sub(text, j + 1), "^%s*(.-)%s*$") or ""
+    return on, rest
+end
+
+local MUT_COLORS = { Gold = "#fbbf24", Emerald = "#34d399", Void = "#a78bfa", Diamond = "#67e8f9", Rainbow = "#f472b6" }
+local function decorate(rest)
+    if string.find(rest, "\t", 1, true) then
+        local parts, pos = {}, 1
+        while true do
+            local i = string.find(rest, "\t", pos, true)
+            if not i then parts[#parts + 1] = string.sub(rest, pos) break end
+            parts[#parts + 1] = string.sub(rest, pos, i - 1)
+            pos = i + 1
+        end
+        for k, v in ipairs(parts) do parts[k] = string.match(v, "^%s*(.-)%s*$") or "" end
+        local out = esc(parts[1])
+        local g = parts[2]
+        if g and g ~= "" and g ~= "?" then out = out .. "  " .. badge(g, GRADE_COLORS[g] or "#9ca3af") end
+        for k = 3, #parts do
+            local p = parts[k]
+            if p ~= "" then
+                local color = string.find(p, "★", 1, true) and "#fbbf24" or string.find(p, "✗", 1, true) and "#f87171" or string.find(p, "✓", 1, true) and "#60a5fa" or MUT_COLORS[p] or "#8b93a7"
+                out = out .. "  " .. span(p, color)
+            end
+        end
+        return out
+    end
+    local name, g = string.match(rest, "^(.-)%s*%[([%w%+%?]+)%]$")
+    if name and name ~= "" then return esc(name) .. "   " .. badge(g, GRADE_COLORS[g] or "#6b7280") end
+    local n1, a1, b1 = string.match(rest, "^(.-)%s*|%s*(.-)%s*|%s*(.-)$")
+    if n1 and n1 ~= "" then return esc(n1) .. "   " .. badge(a1, GRADE_COLORS[a1] or "#9ca3af") .. "  " .. span(b1, "#8b93a7") end
+    local n2, prog = string.match(rest, "^(.-)%s+(%d+/%d+)$")
+    if n2 and n2 ~= "" then return esc(n2) .. "   " .. span(prog, "#8b93a7") end
+    local n3, cnt = string.match(rest, "^(.-)%s*%((%d+)%)$")
+    if n3 and n3 ~= "" then return esc(n3) .. "   " .. span("x" .. cnt, "#8b93a7") end
+    return esc(rest)
+end
+
+-- checkbox row (tree items, pack headers, raid packs, figurines)
+function DS.row(btn)
+    btn.RichText = true
+    local function apply()
+        local on, rest = parseCheck(btn.Text)
+        if on == nil then return end
+        btn.Text = (on and span("●", "#34d399") or span("○", "#5b6380")) .. "  " .. decorate(rest)
+    end
+    btn:GetPropertyChangedSignal("Text"):Connect(apply)
+    apply()
+    return btn
+end
+
+-- ---------- widgets ----------
+function DS.label(parent, text, size, color, font, order)
+    return DS.new("TextLabel", parent, {
+        Size = U2(1, 0, 0, (size or 13) + 4), Text = text, TextSize = size or 13, TextColor3 = color or T.text,
+        Font = font or F_GM, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd, LayoutOrder = order or 0,
+    })
+end
+
+function DS.btn(parent, text, kind, order, h)
+    local fill = ({ ok = T.ok, danger = T.danger, accent = T.accent, info = T.info })[kind or ""] or T.surface3
+    local b = DS.new("TextButton", parent, {
+        Size = U2(1, 0, 0, h or 38), BackgroundColor3 = fill, Text = text, TextColor3 = T.white,
+        Font = F_GB, TextSize = 13, LayoutOrder = order or 0,
+    })
+    DS.corner(b, 8)
+    return b
+end
+
+function DS.status(parent, text, order)
+    local s = DS.new("TextLabel", parent, {
+        Size = U2(1, 0, 0, 30), AutomaticSize = Enum.AutomaticSize.Y, BackgroundColor3 = T.input, Text = text,
+        TextColor3 = T.text2, Font = F_GM, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true, LayoutOrder = order or 0,
+    })
+    DS.corner(s, 8) DS.stroke(s) DS.pad(s, 10, 6, 10, 6)
+    return s
+end
+
+-- switch row: the logic keeps writing "[X] Label" / "[ ] Label" to .Text; the skin turns that into a toggle
+function DS.switch(parent, text, order)
+    local row = DS.new("Frame", parent, { Size = U2(1, 0, 0, 40), BackgroundColor3 = T.surface3, LayoutOrder = order or 0 })
+    DS.corner(row, 8)
+    local btn = DS.new("TextButton", row, { Size = U2(1, 0, 1, 0), Text = text, TextTransparency = 1 })
+    local lbl = DS.new("TextLabel", btn, { Size = U2(1, -64, 1, 0), Position = U2(0, 12, 0, 0), Font = F_GM, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd })
+    local track = DS.new("Frame", btn, { Size = U2(0, 38, 0, 20), Position = U2(1, -50, 0.5, -10), BackgroundColor3 = T.off })
+    DS.corner(track, 10)
+    local knob = DS.new("Frame", track, { Size = U2(0, 14, 0, 14), Position = U2(0, 3, 0.5, -7), BackgroundColor3 = T.white })
+    DS.corner(knob, 7)
+    local function apply()
+        local on, rest = parseCheck(btn.Text)
+        if on == nil then return end
+        lbl.Text = rest
+        lbl.TextColor3 = on and T.text or T.text2
+        TS:Create(track, TweenInfo.new(0.12), { BackgroundColor3 = on and T.ok or T.off }):Play()
+        TS:Create(knob, TweenInfo.new(0.12), { Position = on and U2(1, -17, 0.5, -7) or U2(0, 3, 0.5, -7) }):Play()
+        btn.Text = ""
+    end
+    btn:GetPropertyChangedSignal("Text"):Connect(apply)
+    apply()
+    return btn
+end
+
+function DS.chip(parent, text, order, color)
+    local c = DS.new("TextLabel", parent, {
+        Size = U2(1, 0, 0, 28), BackgroundColor3 = color or T.accentDim, Text = text, Font = F_GB, TextSize = 12,
+        TextColor3 = T.white, LayoutOrder = order or 0,
+    })
+    DS.corner(c, 8)
+    return c
+end
+
+-- labelled text input; "order" doubles as the layout position
+function DS.fullInp(p, lblText, def, order, h)
+    local box = DS.new("Frame", p, { Size = U2(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = order or 0 })
+    DS.vlist(box, 4)
+    DS.label(box, lblText, 12, T.text2, F_GB, 1)
+    local b = DS.new("TextBox", box, {
+        Size = U2(1, 0, 0, math.max(h or 34, 34)), BackgroundColor3 = T.input, Text = def, TextColor3 = T.text, Font = F_GM,
+        TextSize = 14, ClearTextOnFocus = false, TextXAlignment = Enum.TextXAlignment.Left, PlaceholderColor3 = T.text4, LayoutOrder = 2,
+    })
+    DS.corner(b, 8) DS.pad(b, 12, 0, 12, 0)
+    local st = DS.stroke(b)
+    b.Focused:Connect(function() st.Color = T.accent end)
+    b.FocusLost:Connect(function() st.Color = T.stroke end)
+    return b
+end
+function DS.inp(p, lblText, def, order) return DS.fullInp(p, lblText, def, order, 34) end
+
+-- inline dropdown: opens in the layout flow (no overlap / clipping problems). Returns the button; .Text is the value.
+function DS.dropdown(parent, labelText, options, defaultValue, order)
+    local box = DS.new("Frame", parent, { Size = U2(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = order or 0 })
+    DS.vlist(box, 4)
+    DS.label(box, labelText, 12, T.text2, F_GB, 1)
+    local hold = DS.new("Frame", box, { Size = U2(1, 0, 0, 36), BackgroundColor3 = T.input, LayoutOrder = 2 })
+    DS.corner(hold, 8) DS.stroke(hold)
+    local button = DS.new("TextButton", hold, {
+        Size = U2(1, 0, 1, 0), Text = tostring(defaultValue or options[1] or ""), TextColor3 = T.text, Font = F_GM, TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+    })
+    DS.pad(button, 12, 0, 34, 0)
+    local chev = DS.new("TextLabel", hold, { Size = U2(0, 24, 1, 0), Position = U2(1, -28, 0, 0), Text = "▾", Font = F_GB, TextSize = 14, TextColor3 = T.text3 })
+    local menu = DS.new("ScrollingFrame", box, {
+        Size = U2(1, 0, 0, math.min(#options * 32 + 8, 168)), BackgroundColor3 = T.surface2, Visible = false, LayoutOrder = 3,
+        ScrollBarThickness = 3, ScrollBarImageColor3 = T.stroke, CanvasSize = U2(0, 0, 0, #options * 32 + 8),
+    })
+    DS.corner(menu, 8) DS.stroke(menu) DS.pad(menu, 4, 4, 4, 4) DS.vlist(menu, 0)
+    for index, option in ipairs(options) do
+        local item = DS.new("TextButton", menu, {
+            Size = U2(1, 0, 0, 32), LayoutOrder = index, BackgroundColor3 = T.surface2, Text = tostring(option),
+            TextColor3 = T.text, Font = F_GM, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left,
+        })
+        DS.corner(item, 6) DS.pad(item, 8, 0, 8, 0)
+        item.MouseButton1Click:Connect(function()
+            button.Text = tostring(option)
+            menu.Visible = false
+            chev.Text = "▾"
+            if DS.onChange then DS.onChange() end
+        end)
+    end
+    button.MouseButton1Click:Connect(function()
+        menu.Visible = not menu.Visible
+        chev.Text = menu.Visible and "▴" or "▾"
+    end)
+    button:GetPropertyChangedSignal("Visible"):Connect(function() box.Visible = button.Visible end)
+    return button
+end
+
+-- ---------- layout containers ----------
+-- single column, centred cards (Market, HUD, Fish, Gems, Settings)
+function DS.page(parent)
+    local sc = DS.new("ScrollingFrame", parent, {
+        Size = U2(1, 0, 1, 0), ScrollBarThickness = 3, ScrollBarImageColor3 = T.stroke,
+        AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = U2(0, 0, 0, 0), ScrollingDirection = Enum.ScrollingDirection.Y,
+    })
+    DS.vlist(sc, 10).HorizontalAlignment = Enum.HorizontalAlignment.Center
+    DS.pad(sc, 0, 0, 0, 8)
+    return sc
+end
+
+function DS.card(page, title, sub, order)
+    local c = DS.new("Frame", page, { Size = U2(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundColor3 = T.surface, LayoutOrder = order or 0 })
+    DS.corner(c, 12) DS.stroke(c) DS.pad(c, 14, 12, 14, 14) DS.vlist(c, 8)
+    local limit = Instance.new("UISizeConstraint")
+    limit.MaxSize = Vector2.new(520, 100000)
+    limit.Parent = c
+    if title then DS.label(c, title, 15, T.text, F_GB, -2) end
+    if sub then
+        local s = DS.label(c, sub, 12, T.text3, F_GM, -1)
+        s.TextWrapped, s.TextTruncate, s.AutomaticSize, s.Size = true, Enum.TextTruncate.None, Enum.AutomaticSize.Y, U2(1, 0, 0, 16)
+    end
+    return c
+end
+
+-- two panes: list on the left, controls on the right. Stacks automatically on narrow screens.
+function DS.split(page, leftW)
+    local left = DS.new("Frame", page, { BackgroundColor3 = T.surface })
+    DS.corner(left, 12) DS.stroke(left)
+    local right = DS.new("ScrollingFrame", page, {
+        ScrollBarThickness = 3, ScrollBarImageColor3 = T.stroke, AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        CanvasSize = U2(0, 0, 0, 0), ScrollingDirection = Enum.ScrollingDirection.Y,
+    })
+    DS.vlist(right, 8) DS.pad(right, 0, 0, 6, 8)
+    local function relayout()
+        local w = page.AbsoluteSize.X / math.max(uiScale and uiScale.Scale or 1, 0.1)
+        if w >= 640 then
+            left.Position, left.Size = U2(0, 0, 0, 0), U2(0, leftW, 1, 0)
+            right.Position, right.Size = U2(0, leftW + 10, 0, 0), U2(1, -(leftW + 10), 1, 0)
+        else
+            left.Position, left.Size = U2(0, 0, 0, 0), U2(1, 0, 0.45, 0)
+            right.Position, right.Size = U2(0, 0, 0.45, 8), U2(1, 0, 0.55, -8)
+        end
+    end
+    page:GetPropertyChangedSignal("AbsoluteSize"):Connect(relayout)
+    relayout()
+    return left, right
+end
+
+-- left pane of a checklist tab: Select all / Deselect all + scrolling tree
+function DS.tree(card)
+    local bar = DS.new("Frame", card, { Size = U2(1, -12, 0, 30), Position = U2(0, 6, 0, 6) })
+    local function tb(txt, x)
+        local b = DS.new("TextButton", bar, {
+            Size = U2(0.5, -3, 1, 0), Position = U2(x, x == 0 and 0 or 3, 0, 0), BackgroundColor3 = T.surface3,
+            Text = txt, TextColor3 = T.text2, Font = F_GM, TextSize = 12,
+        })
+        DS.corner(b, 6)
+        return b
+    end
+    local sa, da = tb("Select all", 0), tb("Deselect all", 0.5)
+    local pScr = DS.new("ScrollingFrame", card, {
+        Size = U2(1, -12, 1, -44), Position = U2(0, 6, 0, 40), ScrollBarThickness = 3, ScrollBarImageColor3 = T.stroke,
+        AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = U2(0, 0, 0, 0), ScrollingDirection = Enum.ScrollingDirection.Y,
+    })
+    local lay = DS.vlist(pScr, 4)
+    DS.pad(pScr, 0, 0, 6, 0)
+    return sa, da, pScr, lay
+end
+
+-- one collapsible pack block: header (expand + checkbox) and an items frame
+function DS.pack(pScr, order, packName)
+    local pC = DS.new("Frame", pScr, { Size = U2(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = order })
+    DS.vlist(pC, 2)
+    local pH = DS.new("Frame", pC, { Size = U2(1, 0, 0, 32), BackgroundColor3 = T.surface3, LayoutOrder = 1 })
+    DS.corner(pH, 8)
+    local eBtn = DS.new("TextButton", pH, { Size = U2(0, 32, 1, 0), Text = "+", Font = F_GB, TextSize = 16, TextColor3 = T.text2 })
+    local cBtn = DS.new("TextButton", pH, {
+        Size = U2(1, -32, 1, 0), Position = U2(0, 32, 0, 0), Text = " [ ] " .. packName, TextColor3 = T.text2,
+        Font = F_GB, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+    })
+    DS.pad(cBtn, 4, 0, 6, 0) DS.row(cBtn)
+    local iF = DS.new("Frame", pC, { Size = U2(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, Visible = false, LayoutOrder = 2 })
+    DS.vlist(iF, 2) DS.pad(iF, 14, 2, 0, 4)
+    return pC, eBtn, cBtn, iF
+end
+
+function DS.item(parent, text, textSize)
+    local ib = DS.new("TextButton", parent, {
+        Size = U2(1, 0, 0, 28), BackgroundColor3 = T.surface2, Text = text, TextColor3 = T.text3, Font = F_GM,
+        TextSize = (textSize or 11) + 1, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+    })
+    DS.corner(ib, 6) DS.pad(ib, 10, 0, 6, 0)
+    DS.row(ib)
+    return ib
+end
+
 
 LP:WaitForChild("PlayerGui", 15)
 RS:WaitForChild("Remotes", 15)
@@ -41,48 +412,6 @@ pcall(function()
             if state == Enum.TeleportState.Started then qTeleport('loadstring(game:HttpGet("' .. SCRIPT_URL .. '"))()') end
         end)
     end
-end)
-
--- EXTERNAL HUBS
-task.spawn(function()
-    if not LOAD_EXTERNAL_HUBS then return end
-    pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))() end)
-end)
-task.spawn(function()
-    if not LOAD_EXTERNAL_HUBS then return end
-    pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/LunaS3ven/Script/Games/Loader.lua"))() end)
-end)
-task.spawn(function()
-    if not LOAD_EXTERNAL_HUBS then return end
-    pcall(function()
-        local Data = { Owner = "Mana", Library = "Neverlose-UI" }
-        local BaseURL = ("https://raw.githubusercontent.com/%s-scripts/%s/refs/heads/main/Games/"):format(Data.Owner, Data.Library)
-        local function EncodeSpaces(str) return BaseURL .. str:gsub(" ", "%%20") end
-        local Games = {
-            [18172550962] = EncodeSpaces("Pixel Blade.lua"), [18172553902] = EncodeSpaces("Pixel Blade.lua"), [133884972346775] = EncodeSpaces("Pixel Blade.lua"),
-            [130247632398296] = EncodeSpaces("Anime Fighting Simulator.lua"), [76285745979410] = EncodeSpaces("Anime Card Collection.lua"),
-            [75992362647444] = EncodeSpaces("Tap Simulator.lua"), [111187356770616] = EncodeSpaces("Tap Simulator.lua"), 
-            [74260430392611] = EncodeSpaces("Rebirth Champions Ultimate.lua"), [2753915549] = EncodeSpaces("Blox Fruits.lua"),
-            [4442272183] = EncodeSpaces("Blox Fruits.lua"), [7449423635] = EncodeSpaces("Blox Fruits.lua"),
-            [70768610276749] = EncodeSpaces("Anime Final Quest.lua"), [73019180051115] = EncodeSpaces("Anime Final Quest.lua"),
-            [73912821025828] = EncodeSpaces("Anime Final Quest.lua"), [77367808280910] = EncodeSpaces("Anime Final Quest.lua"),
-            [81100481912247] = EncodeSpaces("Anime Final Quest.lua"), [92577188734435] = EncodeSpaces("Anime Final Quest.lua"),
-            [95240177479580] = EncodeSpaces("Anime Final Quest.lua"), [95996380540192] = EncodeSpaces("Anime Final Quest.lua"),
-            [100744519298647] = EncodeSpaces("Anime Final Quest.lua"), [112175864208911] = EncodeSpaces("Anime Final Quest.lua"),
-            [113644871968832] = EncodeSpaces("Anime Final Quest.lua"), [113963744934619] = EncodeSpaces("Anime Final Quest.lua"),
-            [120826799896677] = EncodeSpaces("Anime Final Quest.lua"), [126889338150949] = EncodeSpaces("Anime Final Quest.lua"),
-            [127316980657672] = EncodeSpaces("Anime Final Quest.lua"), [129369781546936] = EncodeSpaces("Anime Final Quest.lua"),
-            [130426042808804] = EncodeSpaces("Anime Final Quest.lua"), [132561514935233] = EncodeSpaces("Anime Final Quest.lua"),
-            [136683944064056] = EncodeSpaces("Anime Final Quest.lua"), [89469502395769] = EncodeSpaces("Kick A Lucky Block.lua"),
-            [88933961678687] = EncodeSpaces("Hyper Speed Runner.lua")
-        }
-        local function LoadScript(id)
-            local url = Games[id]
-            if not url then return end
-            loadstring(game:HttpGetAsync(url))()
-        end
-        LoadScript(game.PlaceId)
-    end)
 end)
 
 -- ==========================================
@@ -280,10 +609,11 @@ local function findGradeInUI(iName)
 end
 
 -- ==========================================
--- 3. MASTER UI SETUP (10 TABS)
+-- 3. MASTER UI SETUP (11 TABS, REDESIGNED)
 -- ==========================================
 local AllItemButtons, AllOpenerButtons = {}, {}
 local SaveConfig, SaveState 
+DS.onChange = function() if SaveConfig then SaveConfig() end end
 
 local sharedEnv = (type(getgenv) == "function" and getgenv()) or _G
 local function safeGuiParent()
@@ -313,23 +643,18 @@ sharedEnv.ACC_SpyOn = false
 
 local targetParent = safeGuiParent() or LP:FindFirstChild("PlayerGui")
 
-local sg = Instance.new("ScreenGui", targetParent)
-sg.Name = "ACC_Suite"
-sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-sg.ResetOnSpawn = false
+local sg = DS.new("ScreenGui", targetParent, { Name = "ACC_Suite", ZIndexBehavior = Enum.ZIndexBehavior.Sibling, ResetOnSpawn = false })
 
-local sqBtn = Instance.new("TextButton", sg)
-sqBtn.Size, sqBtn.Position, sqBtn.BackgroundColor3, sqBtn.TextColor3 = U2(0, 45, 0, 45), U2(0.5, -22, 0, 20), C3(35, 35, 35), C3(255, 255, 255)
-sqBtn.Text, sqBtn.Font, sqBtn.TextSize, sqBtn.Visible, sqBtn.Active, sqBtn.Draggable, sqBtn.BorderSizePixel = "ACC", F_GB, 12, false, true, true, 0
-Instance.new("UICorner", sqBtn).CornerRadius = UDim.new(0, 8)
+local sqBtn = DS.new("TextButton", sg, { Size = U2(0, 92, 0, 34), Position = U2(0.5, -46, 0, 16), BackgroundColor3 = T.surface, Text = "ACC  ▸", TextColor3 = T.text, Font = F_GB, TextSize = 13, Visible = false })
+DS.corner(sqBtn, 17) DS.stroke(sqBtn, T.accent, 1.5)
 
-local mFrame = Instance.new("Frame", sg)
-mFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-mFrame.Size, mFrame.Position, mFrame.BackgroundColor3, mFrame.BorderSizePixel = U2(0.94, 0, 0.88, 0), U2(0.5, 0, 0.5, 0), C3(35, 35, 35), 0
-mFrame.Active, mFrame.Draggable, mFrame.ClipsDescendants = true, true, true
-local frameConstraint = Instance.new("UISizeConstraint", mFrame)
-frameConstraint.MinSize = Vector2.new(360, 420)
-frameConstraint.MaxSize = Vector2.new(980, 760)
+local mFrame = DS.new("Frame", sg, { AnchorPoint = Vector2.new(0.5, 0.5), Size = U2(0.94, 0, 0.88, 0), Position = U2(0.5, 0, 0.5, 0), BackgroundColor3 = T.bg, Active = true, ClipsDescendants = true })
+DS.corner(mFrame, 14) DS.stroke(mFrame)
+do
+    local limit = Instance.new("UISizeConstraint")
+    limit.MinSize, limit.MaxSize = Vector2.new(340, 420), Vector2.new(960, 700)
+    limit.Parent = mFrame
+end
 
 task.spawn(function()
     while task.wait(2) do
@@ -345,84 +670,66 @@ task.spawn(function()
     end
 end)
 
-local uiScale = Instance.new("UIScale", mFrame) uiScale.Scale = 1
-local tBar = Instance.new("Frame", mFrame) tBar.Size, tBar.BackgroundColor3, tBar.BorderSizePixel = U2(1, 0, 0, 40), C3(20, 20, 20), 0
-local title = Instance.new("TextLabel", tBar) title.Size, title.Position, title.BackgroundTransparency, title.TextColor3, title.Text, title.Font, title.TextSize, title.TextXAlignment = U2(1,-60,1,0), U2(0,10,0,0), 1, C3(255,255,255), "ACC Master Suite (" .. LP.Name .. ")", F_GB, 14, Enum.TextXAlignment.Left
+uiScale = Instance.new("UIScale") uiScale.Scale = 1 uiScale.Parent = mFrame
 
-local minBtn = Instance.new("TextButton", tBar) minBtn.Size, minBtn.Position, minBtn.BackgroundColor3, minBtn.TextColor3, minBtn.Text, minBtn.Font, minBtn.TextSize, minBtn.BorderSizePixel = U2(0,40,0,40), U2(1,-40,0,0), C3(200,180,40), C3(25,25,25), "—", F_GB, 14, 0
-minBtn.MouseButton1Click:Connect(function() mFrame.Visible = false sqBtn.Visible = true end)
-sqBtn.MouseButton1Click:Connect(function() sqBtn.Visible = false mFrame.Visible = true end)
-
-local tabC = Instance.new("ScrollingFrame", mFrame)
-tabC.Size, tabC.Position, tabC.BackgroundColor3, tabC.BorderSizePixel = U2(1, 0, 0, 42), U2(0, 0, 0, 40), C3(25, 25, 25), 0
-tabC.Active, tabC.ScrollingDirection, tabC.ScrollBarThickness, tabC.CanvasSize = true, Enum.ScrollingDirection.X, 4, U2(0, 0, 0, 0)
-tabC.AutomaticCanvasSize = Enum.AutomaticSize.X
-local tabLayout = Instance.new("UIListLayout", tabC)
-tabLayout.FillDirection, tabLayout.SortOrder, tabLayout.Padding = Enum.FillDirection.Horizontal, Enum.SortOrder.LayoutOrder, UDim.new(0, 2)
-
-local function mkTabBtn(name, pIdx)
-    local b = Instance.new("TextButton", tabC) b.Size, b.LayoutOrder, b.Text, b.Font, b.TextSize, b.BorderSizePixel = U2(0, 94, 1, 0), pIdx, name, F_GB, 12, 0
-    b.BackgroundColor3, b.TextColor3 = pIdx==1 and C3(45,45,45) or C3(35,35,35), pIdx==1 and C3(255,255,255) or C3(150,150,150)
-    return b
+-- title bar
+local tBar = DS.new("Frame", mFrame, { Size = U2(1, 0, 0, 48), Active = true })
+local minBtn
+do
+    local logo = DS.new("TextLabel", tBar, { Size = U2(0, 28, 0, 28), Position = U2(0, 14, 0.5, -14), BackgroundColor3 = T.accent, Text = "A", Font = F_GB, TextSize = 15, TextColor3 = T.white })
+    DS.corner(logo, 8)
+    DS.new("TextLabel", tBar, { Size = U2(1, -110, 0, 18), Position = U2(0, 52, 0, 7), Text = "ACC Master Suite", Font = F_GB, TextSize = 15, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd })
+    DS.new("TextLabel", tBar, { Size = U2(1, -110, 0, 14), Position = U2(0, 52, 0, 26), Text = "@" .. LP.Name, Font = F_GM, TextSize = 11, TextColor3 = T.text3, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd })
+    minBtn = DS.new("TextButton", tBar, { Size = U2(0, 32, 0, 32), Position = U2(1, -44, 0.5, -16), BackgroundColor3 = T.surface3, Text = "–", Font = F_GB, TextSize = 16, TextColor3 = T.text2 })
+    DS.corner(minBtn, 8)
 end
+DS.new("Frame", mFrame, { Size = U2(1, 0, 0, 1), Position = U2(0, 0, 0, 48), BackgroundColor3 = T.stroke })
 
-local nTabs = 10
-local tBtns = {
-    mkTabBtn("Cards",1), mkTabBtn("Tower",2), mkTabBtn("Opener",3),
-    mkTabBtn("Figurines",4), mkTabBtn("Raid",5), mkTabBtn("Fish",6),
-    mkTabBtn("Gems",7), mkTabBtn("HUD",8), mkTabBtn("Spy",9), mkTabBtn("⚙",10)
-}
-local tFrames = {}
-for i=1, nTabs do
-    local f = Instance.new("Frame", mFrame) f.Size, f.Position, f.BackgroundTransparency, f.Visible = U2(1,0,1,-82), U2(0,0,0,82), 1, i==1
-    tFrames[i] = f
-end
-for i, btn in ipairs(tBtns) do
-    btn.MouseButton1Click:Connect(function()
-        for j, b in ipairs(tBtns) do
-            b.BackgroundColor3, b.TextColor3 = b==btn and C3(45,45,45) or C3(35,35,35), b==btn and C3(255,255,255) or C3(150,150,150)
-            tFrames[j].Visible = tFrames[j]==tFrames[i]
-        end
-    end)
-end
-local cFrame, tFrame, oFrame, figFrame, raidFrame, fFrame, gFrame, hudTabFrame, spyFrame, sFrame = unpack(tFrames)
+-- tab strip + pages
+local tFrames, tBtns = {}, {}
+do
+    local tabC = DS.new("ScrollingFrame", mFrame, {
+        Size = U2(1, 0, 0, 40), Position = U2(0, 0, 0, 49), ScrollingDirection = Enum.ScrollingDirection.X, ScrollBarThickness = 2,
+        ScrollBarImageColor3 = T.stroke, AutomaticCanvasSize = Enum.AutomaticSize.X, CanvasSize = U2(0, 0, 0, 0),
+    })
+    local tabLayout = Instance.new("UIListLayout")
+    tabLayout.FillDirection, tabLayout.SortOrder, tabLayout.Padding = Enum.FillDirection.Horizontal, Enum.SortOrder.LayoutOrder, UDim.new(0, 4)
+    tabLayout.Parent = tabC
+    DS.pad(tabC, 10, 4, 10, 4)
 
-local function mkInp(p, lblText, def, py, xOff, wid)
-    wid = wid or 240
-    local l = Instance.new("TextLabel", p) l.Size, l.Position, l.BackgroundTransparency, l.TextColor3, l.Text, l.Font, l.TextSize, l.TextXAlignment = U2(0,wid,0,20), U2(0.5,xOff,0,py), 1, C3(200,200,200), lblText, F_GB, 12, Enum.TextXAlignment.Left
-    local b = Instance.new("TextBox", p) b.Size, b.Position, b.BackgroundColor3, b.TextColor3, b.Text, b.Font, b.TextSize, b.BorderSizePixel = U2(0,wid,0,36), U2(0.5,xOff,0,py+20), C3(15,15,15), C3(255,255,255), def, F_GM, 14, 0
-    return b
-end
-
-local function mkFullInp(p, lblText, def, py, h)
-    h = h or 30
-    local l = Instance.new("TextLabel", p) l.Size, l.Position, l.BackgroundTransparency, l.TextColor3, l.Text, l.Font, l.TextSize, l.TextXAlignment = U2(1,0,0,20), U2(0,0,0,py), 1, C3(200,200,200), lblText, F_GB, 12, Enum.TextXAlignment.Left
-    local b = Instance.new("TextBox", p) b.Size, b.Position, b.BackgroundColor3, b.TextColor3, b.Text, b.Font, b.TextSize, b.BorderSizePixel = U2(1,0,0,h), U2(0,0,0,py+20), C3(15,15,15), C3(255,255,255), def, F_GM, 14, 0
-    return b
-end
-
-local function mkDropdown(parent, labelText, options, defaultValue, y, width)
-    width = width or 260
-    local label = Instance.new("TextLabel", parent)
-    label.Size, label.Position, label.BackgroundTransparency, label.TextColor3, label.Text, label.Font, label.TextSize = U2(0, width, 0, 20), U2(0.5, -width / 2, 0, y), 1, C3(200, 200, 200), labelText, F_GB, 12
-    local button = Instance.new("TextButton", parent)
-    button.Size, button.Position, button.BackgroundColor3, button.TextColor3, button.Text, button.Font, button.TextSize, button.BorderSizePixel = U2(0, width, 0, 36), U2(0.5, -width / 2, 0, y + 20), C3(15, 15, 15), C3(255, 255, 255), tostring(defaultValue or options[1] or ""), F_GM, 14, 0
-    local menu = Instance.new("ScrollingFrame", parent)
-    menu.Size, menu.Position, menu.BackgroundColor3, menu.BorderSizePixel, menu.ScrollBarThickness, menu.Visible, menu.ZIndex = U2(0, width, 0, 180), U2(0.5, -width / 2, 0, y + 58), C3(25, 25, 25), 0, 6, false, 20
-    menu.CanvasSize = U2(0, 0, 0, #options * 36)
-    local layout = Instance.new("UIListLayout", menu)
-    layout.SortOrder = Enum.SortOrder.LayoutOrder
-    for index, option in ipairs(options) do
-        local item = Instance.new("TextButton", menu)
-        item.Size, item.LayoutOrder, item.BackgroundColor3, item.TextColor3, item.Text, item.Font, item.TextSize, item.BorderSizePixel, item.ZIndex = U2(1, -8, 0, 36), index, C3(35, 35, 35), C3(255, 255, 255), tostring(option), F_GM, 13, 0, 21
-        item.MouseButton1Click:Connect(function()
-            button.Text = tostring(option)
-            menu.Visible = false
-        end)
+    local tabNames = { "Cards", "Tower", "Auto Tower", "Star Trial", "Opener", "Figurines", "Market", "Raid", "Fish", "Gems", "HUD", "Spy", "Settings" }
+    for i, name in ipairs(tabNames) do
+        local b = DS.new("TextButton", tabC, { Size = U2(0, 0, 1, 0), AutomaticSize = Enum.AutomaticSize.X, LayoutOrder = i, BackgroundColor3 = T.surface3, Text = name, Font = F_GB, TextSize = 12 })
+        DS.corner(b, 8) DS.pad(b, 12, 0, 12, 0)
+        tBtns[i] = b
+        local f = DS.new("Frame", mFrame, { Size = U2(1, 0, 1, -90), Position = U2(0, 0, 0, 90), ClipsDescendants = true })
+        DS.pad(f, 10, 8, 10, 10)
+        tFrames[i] = f
     end
-    button.MouseButton1Click:Connect(function() menu.Visible = not menu.Visible end)
-    return button
+    local function selectTab(idx)
+        for j, b in ipairs(tBtns) do
+            local on = j == idx
+            b.BackgroundTransparency = on and 0 or 1
+            b.BackgroundColor3 = on and T.accent or T.surface3
+            b.TextColor3 = on and T.white or T.text3
+            tFrames[j].Visible = on
+        end
+    end
+    for i, btn in ipairs(tBtns) do btn.MouseButton1Click:Connect(function() selectTab(i) end) end
+    selectTab(1)
 end
+local cFrame, tFrame, autoFrame, starFrame, oFrame, figFrame, mktFrame, raidFrame, fFrame, gFrame, hudTabFrame, spyFrame, sFrame = unpack(tFrames)
+
+minBtn.MouseButton1Click:Connect(function() mFrame.Visible = false sqBtn.Visible = true end)
+sqBtn.MouseButton1Click:Connect(function()
+    if sqBtn:GetAttribute("wasDragged") then return end
+    sqBtn.Visible = false mFrame.Visible = true
+end)
+DS.drag(tBar, mFrame)
+DS.drag(sqBtn, sqBtn)
+
+local mkInp, mkFullInp, mkDropdown = DS.inp, DS.fullInp, DS.dropdown
+
 
 -- ==========================================
 -- 4. SPY SCANNER (WITH FILE DUMP)
@@ -433,29 +740,39 @@ local function buildSpy(parent)
     local selectedBody, renderQueued, hookNote = "", false, "hook not installed yet"
     local bound = env.ACC_SpyBound or {} env.ACC_SpyBound, env.ACC_SpyOn = bound, false
 
-    local bar = Instance.new("Frame", parent) bar.Size, bar.Position, bar.BackgroundTransparency = U2(1, -12, 0, 28), U2(0, 6, 0, 6), 1
-    local filter = Instance.new("TextBox", parent) filter.Size, filter.Position, filter.BackgroundColor3, filter.TextColor3 = U2(1, -12, 0, 26), U2(0, 6, 0, 38), C3(15, 15, 15), C3(255, 255, 255)
-    filter.PlaceholderText, filter.Text, filter.Font, filter.TextSize, filter.ClearTextOnFocus, filter.BorderSizePixel = "Filter (remote, module, args...)", "", F_GM, 13, false, 0
+    local bar = DS.new("Frame", parent, { Size = U2(1, 0, 0, 32) })
+    local filter = DS.new("TextBox", parent, {
+        Size = U2(1, 0, 0, 32), Position = U2(0, 0, 0, 40), BackgroundColor3 = T.input, TextColor3 = T.text, PlaceholderText = "Filter (remote, module, args...)",
+        PlaceholderColor3 = T.text4, Text = "", Font = F_GM, TextSize = 13, ClearTextOnFocus = false, TextXAlignment = Enum.TextXAlignment.Left,
+    })
+    DS.corner(filter, 8) DS.stroke(filter) DS.pad(filter, 12, 0, 12, 0)
 
-    local status = Instance.new("TextLabel", parent)
-    status.BackgroundTransparency, status.Size, status.Position, status.Font, status.TextSize = 1, U2(1, -165, 0, 16), U2(0, 8, 0, 68), F_GM, 12
-    status.TextXAlignment, status.TextColor3, status.Text = Enum.TextXAlignment.Left, C3(180, 180, 180), "Full maps the game. Listen logs calls."
+    local status = DS.new("TextLabel", parent, {
+        Size = U2(1, -170, 0, 18), Position = U2(0, 2, 0, 80), Font = F_GM, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
+        TextColor3 = T.text3, Text = "Full maps the game. Listen logs calls.", TextTruncate = Enum.TextTruncate.AtEnd,
+    })
+    local copyBtn = DS.new("TextButton", parent, { Size = U2(0, 70, 0, 22), Position = U2(1, -70, 0, 78), BackgroundColor3 = T.surface3, TextColor3 = T.text2, Text = "Copy", Font = F_GM, TextSize = 12 })
+    local dumpBtn = DS.new("TextButton", parent, { Size = U2(0, 84, 0, 22), Position = U2(1, -160, 0, 78), BackgroundColor3 = T.surface3, TextColor3 = T.text2, Text = "Dump file", Font = F_GM, TextSize = 12 })
+    DS.corner(copyBtn, 6) DS.corner(dumpBtn, 6)
 
-    local copyBtn = Instance.new("TextButton", parent) copyBtn.Size, copyBtn.Position, copyBtn.BackgroundColor3, copyBtn.TextColor3, copyBtn.Text, copyBtn.Font, copyBtn.TextSize, copyBtn.BorderSizePixel, copyBtn.ZIndex, copyBtn.Visible = U2(0, 64, 0, 18), U2(1, -70, 0, 66), C3(40, 40, 40), C3(255, 255, 255), "Copy", F_GB, 12, 0, 10, true
-    local dumpBtn = Instance.new("TextButton", parent) dumpBtn.Size, dumpBtn.Position, dumpBtn.BackgroundColor3, dumpBtn.TextColor3, dumpBtn.Text, dumpBtn.Font, dumpBtn.TextSize, dumpBtn.BorderSizePixel, dumpBtn.ZIndex, dumpBtn.Visible = U2(0, 80, 0, 18), U2(1, -155, 0, 66), C3(40, 40, 40), C3(255, 255, 255), "Dump File", F_GB, 12, 0, 10, true
-
-    local list = Instance.new("ScrollingFrame", parent) list.Size, list.Position, list.BackgroundColor3, list.BorderSizePixel, list.ScrollBarThickness, list.CanvasSize = U2(1, -12, 1, -196), U2(0, 6, 0, 88), C3(18, 18, 18), 0, 6, U2(0, 0, 0, 0)
-    local lay = Instance.new("UIListLayout", list) lay.SortOrder, lay.Padding = Enum.SortOrder.LayoutOrder, UDim.new(0, 2)
+    local listWrap = DS.new("Frame", parent, { Size = U2(1, 0, 1, -212), Position = U2(0, 0, 0, 108), BackgroundColor3 = T.input })
+    DS.corner(listWrap, 8) DS.stroke(listWrap)
+    local list = DS.new("ScrollingFrame", listWrap, { Size = U2(1, -8, 1, -8), Position = U2(0, 4, 0, 4), ScrollBarThickness = 4, ScrollBarImageColor3 = T.stroke, CanvasSize = U2(0, 0, 0, 0) })
+    local lay = DS.vlist(list, 2)
     lay:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() list.CanvasSize = U2(0, 0, 0, lay.AbsoluteContentSize.Y + 4) end)
 
-    local detail = Instance.new("TextBox", parent) detail.Size, detail.Position, detail.BackgroundColor3, detail.TextColor3, detail.Font, detail.TextSize = U2(1, -12, 0, 92), U2(0, 6, 1, -98), C3(12, 12, 12), C3(220, 220, 220), F_GM, 12
-    detail.TextXAlignment, detail.TextYAlignment, detail.TextWrapped, detail.ClearTextOnFocus, detail.TextEditable, detail.MultiLine, detail.BorderSizePixel, detail.Text = Enum.TextXAlignment.Left, Enum.TextYAlignment.Top, true, false, false, true, 0, "Nothing selected."
+    local detail = DS.new("TextBox", parent, {
+        Size = U2(1, 0, 0, 96), Position = U2(0, 0, 1, -96), BackgroundColor3 = T.input, TextColor3 = T.text2, Font = F_GM, TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top, TextWrapped = true, ClearTextOnFocus = false,
+        TextEditable = false, MultiLine = true, Text = "Nothing selected.",
+    })
+    DS.corner(detail, 8) DS.stroke(detail) DS.pad(detail, 10, 8, 10, 8)
 
     local labels = { "Full", "Listen", "Clear" }
     local buttons = {}
     for i, name in ipairs(labels) do
-        local b = Instance.new("TextButton", bar)
-        b.Size, b.Position, b.BackgroundColor3, b.TextColor3, b.Text, b.Font, b.TextSize, b.BorderSizePixel = U2(1 / #labels, -2, 1, 0), U2((i - 1) / #labels, 0, 0, 0), C3(40, 40, 40), C3(255, 255, 255), name, F_GB, 11, 0
+        local b = DS.new("TextButton", bar, { Size = U2(1 / #labels, -4, 1, 0), Position = U2((i - 1) / #labels, (i - 1) * 2, 0, 0), BackgroundColor3 = T.surface3, TextColor3 = T.text, Text = name, Font = F_GB, TextSize = 12 })
+        DS.corner(b, 8)
         buttons[name] = b
     end
 
@@ -469,8 +786,12 @@ local function buildSpy(parent)
             local hay = string.lower(entry.title .. "\n" .. (entry.body or ""))
             if q == "" or string.find(hay, q, 1, true) ~= nil then
                 shown = shown + 1
-                local row = Instance.new("TextButton", list)
-                row.Size, row.BackgroundColor3, row.TextColor3, row.Font, row.TextSize, row.TextXAlignment, row.BorderSizePixel, row.AutoButtonColor, row.Text, row.LayoutOrder = U2(1, -8, 0, 20), (i % 2 == 0) and C3(30, 30, 30) or C3(24, 24, 24), C3(230, 230, 230), F_GM, 12, Enum.TextXAlignment.Left, 0, true, "  " .. entry.title, i
+                local tint = string.sub(entry.title, 1, 5) == "[OUT]" and Color3.fromRGB(147, 197, 253) or (string.sub(entry.title, 1, 4) == "[IN]" and T.ok2 or T.text2)
+                local row = DS.new("TextButton", list, {
+                    Size = U2(1, -6, 0, 22), BackgroundColor3 = (i % 2 == 0) and T.surface2 or T.surface, TextColor3 = tint, Font = F_GM, TextSize = 12,
+                    TextXAlignment = Enum.TextXAlignment.Left, Text = "  " .. entry.title, LayoutOrder = i, TextTruncate = Enum.TextTruncate.AtEnd,
+                })
+                DS.corner(row, 4)
                 local body = entry.body or entry.title
                 row.MouseButton1Click:Connect(function() selectedBody = body detail.Text = body end)
             end
@@ -670,26 +991,107 @@ if not spyBuilt then
 end
 
 -- ==========================================
--- 5. BACKGROUND MODULES (HUD, RAID, FISH, GEMS)
+-- 5. BACKGROUND MODULES (MARKET, HUD, RAID, FISH, GEMS)
 -- ==========================================
+local remotes = RS:FindFirstChild("Remotes")
+local function getRemote(name)
+    return remotes and remotes:FindFirstChild(name) or nil
+end
+
+-- MARKET AUTO-BUY ALL ON REFRESH
+local mktPnl = DS.card(DS.page(mktFrame), "Market", "Buys every item in the shop the moment it restocks.", 1)
+local mktBuyBtn = DS.switch(mktPnl, "[ ] Auto-Buy All on Refresh", 1)
+local mktNowBtn = DS.btn(mktPnl, "Trigger BuyAll Now", "info", 2, 38)
+local mktStat = DS.status(mktPnl, "Status: Idle", 3)
+
+local isMarketBuyAll = false
+local marketBuyCount = 0
+local lastStockSignature = ""
+local stockEvt = getRemote("Stock")
+local getStockFn = getRemote("GetStock")
+local updateStockTimeEvt = getRemote("UpdateStockTime")
+
+local lastBuyAt = -1e9
+local function executeMarketBuyAll(reason, force)
+    if not stockEvt then
+        mktStat.Text = "ERR: Stock Remote Missing"
+        return
+    end
+    -- the timer fires several events around a restock; only react once per restock
+    if not force and os.clock() - lastBuyAt < 5 then return end
+    lastBuyAt = os.clock()
+    task.wait(0.25) -- Brief buffer so server finishes populating restocked items
+    -- fired twice: an owned dragon ball can block the first pass, the second pass picks up the rest
+    local ok = false
+    for pass = 1, 2 do
+        ok = pcall(function() stockEvt:FireServer("BuyAll") end) or ok
+        if pass == 1 then task.wait(0.4) end
+    end
+    if ok then
+        marketBuyCount = marketBuyCount + 1
+        mktStat.Text = string.format("Bought All x2 (%s) | Total Restocks: %d", reason or "Refresh", marketBuyCount)
+    end
+end
+
+if updateStockTimeEvt then
+    updateStockTimeEvt.OnClientEvent:Connect(function(timeLeft)
+        if not isMarketBuyAll then return end
+        -- When stock timer resets (high value or <= 1s rollover), trigger BuyAll
+        local t = tonumber(timeLeft)
+        if t and (t <= 1 or t >= 295) then
+            executeMarketBuyAll("Timer Reset")
+        end
+    end)
+end
+
+if stockEvt then
+    stockEvt.OnClientEvent:Connect(function(action)
+        if not isMarketBuyAll then return end
+        if action == "Refresh" or action == "Restock" or action == "Update" then
+            executeMarketBuyAll("Stock Event")
+        end
+    end)
+end
+
+local function setMarketBuyState(state)
+    isMarketBuyAll = state and stockEvt ~= nil
+    mktBuyBtn.Text = isMarketBuyAll and "[X] Auto-Buy All on Refresh" or "[ ] Auto-Buy All on Refresh"
+    mktBuyBtn.BackgroundColor3 = isMarketBuyAll and C3(40,200,120) or C3(50,50,50)
+    mktBuyBtn.TextColor3 = isMarketBuyAll and C3(255,255,255) or C3(200,200,200)
+    if isMarketBuyAll then
+        mktStat.Text = "Listening for shop refresh..."
+        task.spawn(executeMarketBuyAll, "Initial Sweep", true)
+    else
+        mktStat.Text = "Status: Idle"
+    end
+end
+
+mktBuyBtn.MouseButton1Click:Connect(function()
+    setMarketBuyState(not isMarketBuyAll)
+    if SaveState then SaveState() end
+end)
+
+mktNowBtn.MouseButton1Click:Connect(function()
+    executeMarketBuyAll("Manual", true)
+end)
+
+-- HUD
 local isHudEnabled = false
-local accHud = Instance.new("Frame", sg)
-accHud.Size, accHud.Position, accHud.BackgroundColor3, accHud.BackgroundTransparency = U2(0, 200, 0, 150), U2(0, 20, 0.5, -75), C3(15,15,15), 0.3
-accHud.Active, accHud.Draggable, accHud.Visible = true, true, false
-Instance.new("UICorner", accHud).CornerRadius = UDim.new(0, 8)
+local accHud = DS.new("Frame", sg, { Size = U2(0, 190, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, Position = U2(0, 20, 0.5, -60), BackgroundColor3 = T.bg, BackgroundTransparency = 0.12, Active = true, Visible = false })
+DS.corner(accHud, 10) DS.stroke(accHud) DS.pad(accHud, 10, 8, 10, 8) DS.vlist(accHud, 4)
+DS.drag(accHud, accHud)
 
 local function mkHudRow(py, iconId, defText)
-    local r = Instance.new("Frame", accHud) r.Size, r.Position, r.BackgroundTransparency = U2(1,0,0,25), U2(0,0,0,py), 1
-    local ic = Instance.new("ImageLabel", r) ic.Size, ic.Position, ic.BackgroundTransparency, ic.Image = U2(0,20,0,20), U2(0,10,0,2), 1, iconId
-    local tx = Instance.new("TextLabel", r) tx.Size, tx.Position, tx.BackgroundTransparency, tx.TextColor3, tx.Text, tx.Font, tx.TextSize, tx.TextXAlignment = U2(1,-40,1,0), U2(0,35,0,0), 1, C3(255,255,255), defText, F_GM, 13, Enum.TextXAlignment.Left
-    return tx
+    local r = DS.new("Frame", accHud, { Size = U2(1, 0, 0, 24), LayoutOrder = py })
+    DS.new("ImageLabel", r, { Size = U2(0, 18, 0, 18), Position = U2(0, 0, 0.5, -9), Image = iconId })
+    return DS.new("TextLabel", r, { Size = U2(1, -26, 1, 0), Position = U2(0, 26, 0, 0), Text = defText, Font = F_GB, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left })
 end
 local hCash = mkHudRow(30, "rbxassetid://84225083685543", "Cash: 0")
 local hEvt = mkHudRow(55, "rbxassetid://82846623271410", "Event: 0")
 local hGrade = mkHudRow(80, "rbxassetid://76024843045813", "Grade: 0")
 local hFish = mkHudRow(105, "rbxassetid://131575541379453", "Fish: 0")
 
-local hudTglBtn = Instance.new("TextButton", hudTabFrame) hudTglBtn.Size, hudTglBtn.Position, hudTglBtn.BackgroundColor3, hudTglBtn.TextColor3, hudTglBtn.Text, hudTglBtn.Font, hudTglBtn.TextSize, hudTglBtn.BorderSizePixel = U2(0,240,0,40), U2(0.5,-120,0,20), C3(50,50,50), C3(200,200,200), "[ ] Enable Live HUD", F_GB, 14, 0
+local hudTglBtn = DS.switch(DS.card(DS.page(hudTabFrame), "Live HUD", "Floating counters for cash, event, grade and fish tokens. Drag it anywhere.", 1), "[ ] Enable Live HUD", 1)
 local function setHudState(state)
     isHudEnabled = state hudTglBtn.Text, hudTglBtn.BackgroundColor3 = isHudEnabled and "[X] Enable Live HUD" or "[ ] Enable Live HUD", isHudEnabled and C3(40,200,120) or C3(50,50,50) accHud.Visible = isHudEnabled
     if isHudEnabled then task.spawn(function()
@@ -705,30 +1107,24 @@ local function setHudState(state)
 end
 hudTglBtn.MouseButton1Click:Connect(function() setHudState(not isHudEnabled) if SaveState then SaveState() end end)
 
-local fPnl = Instance.new("Frame", fFrame) fPnl.Size, fPnl.Position, fPnl.BackgroundColor3, fPnl.BorderSizePixel = U2(1,-20,1,-20), U2(0,10,0,10), C3(30,30,30), 0
-local fDelInp = mkInp(fPnl, "Loop Delay (Seconds)", "3", 50, -120) fDelInp.FocusLost:Connect(function() if SaveConfig then SaveConfig() end end)
-local fTglBtn = Instance.new("TextButton", fPnl) fTglBtn.Size, fTglBtn.Position, fTglBtn.BackgroundColor3, fTglBtn.TextColor3, fTglBtn.Text, fTglBtn.Font, fTglBtn.TextSize, fTglBtn.BorderSizePixel = U2(0,240,0,40), U2(0.5,-120,0,120), C3(200,40,40), C3(255,255,255), "Stop Auto-Fish", F_GB, 14, 0
-local remotes = RS:FindFirstChild("Remotes")
-local function getRemote(name)
-    return remotes and remotes:FindFirstChild(name) or nil
-end
+-- FISH
+local fPnl = DS.card(DS.page(fFrame), "Auto Fish", "Casts the rod and reels in on a loop.", 1)
+local fDelInp = mkInp(fPnl, "Loop Delay (Seconds)", "3", 50) fDelInp.FocusLost:Connect(function() if SaveConfig then SaveConfig() end end)
+local fTglBtn = DS.btn(fPnl, "Stop Auto-Fish", "danger", 60, 40)
 
+-- RAID
 local RaidConfig, CardConfig
 pcall(function() RaidConfig = require(RS.Modules.Config.Core.RaidConfig) end)
 pcall(function() CardConfig = require(RS.Modules.Config.Core.CardConfig) end)
 
-local raidPanel = Instance.new("Frame", raidFrame)
-raidPanel.Size, raidPanel.Position, raidPanel.BackgroundColor3, raidPanel.BorderSizePixel = U2(1, -20, 1, -20), U2(0, 10, 0, 10), C3(30, 30, 30), 0
 local raidPacks = RaidConfig and RaidConfig.ActiveRaids or {}
-local raidStatus = Instance.new("TextLabel", raidPanel)
-raidStatus.Size, raidStatus.Position, raidStatus.BackgroundColor3, raidStatus.TextColor3, raidStatus.Text, raidStatus.Font, raidStatus.TextSize = U2(1, -20, 0, 28), U2(0, 10, 0, 12), C3(20, 20, 20), C3(200, 200, 200), "Status: Idle", F_GM, 12
-local raidBtn = Instance.new("TextButton", raidPanel)
-raidBtn.Size, raidBtn.Position, raidBtn.BackgroundColor3, raidBtn.TextColor3, raidBtn.Text, raidBtn.Font, raidBtn.TextSize = U2(0, 260, 0, 40), U2(0.5, -130, 0, 190), C3(40, 200, 120), C3(255, 255, 255), "Start Auto-Raid", F_GB, 14
-local raidPackList = Instance.new("ScrollingFrame", raidPanel)
-raidPackList.Size, raidPackList.Position, raidPackList.BackgroundColor3, raidPackList.BorderSizePixel, raidPackList.ScrollBarThickness = U2(1, -20, 1, -250), U2(0, 10, 0, 240), C3(22, 22, 22), 0, 6
-raidPackList.CanvasSize = U2(0, 0, 0, #raidPacks * 34)
-local raidPackLayout = Instance.new("UIListLayout", raidPackList)
-raidPackLayout.SortOrder = Enum.SortOrder.LayoutOrder
+local raidListCard, raidPanel = DS.split(raidFrame, 260)
+local raidStatus = DS.status(raidPanel, "Status: Idle", 1)
+local raidBtn = DS.btn(raidPanel, "Start Auto-Raid", "ok", 2, 40)
+DS.label(raidListCard, "Raid packs  -  tap to queue", 12, T.text2, F_GB).Position = U2(0, 12, 0, 8)
+local raidPackList = DS.new("ScrollingFrame", raidListCard, { Size = U2(1, -12, 1, -38), Position = U2(0, 6, 0, 32), ScrollBarThickness = 3, ScrollBarImageColor3 = T.stroke, AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = U2(0, 0, 0, 0) })
+local raidPackLayout = DS.vlist(raidPackList, 4)
+DS.pad(raidPackList, 0, 0, 6, 0)
 local raidSelectedPacks, raidPackButtons = {}, {}
 
 local function raidProgress(packName)
@@ -747,8 +1143,8 @@ local function refreshRaidPackRows()
 end
 
 for index, packName in ipairs(raidPacks) do
-    local packBtn = Instance.new("TextButton", raidPackList)
-    packBtn.Size, packBtn.LayoutOrder, packBtn.BackgroundColor3, packBtn.TextColor3, packBtn.Text, packBtn.Font, packBtn.TextSize, packBtn.BorderSizePixel = U2(1, -8, 0, 32), index, C3(35, 35, 35), C3(210, 210, 210), "[ ] " .. packName .. "  0/9", F_GM, 12, 0
+    local packBtn = DS.new("TextButton", raidPackList, { Size = U2(1, 0, 0, 34), LayoutOrder = index, BackgroundColor3 = T.surface2, TextColor3 = T.text2, Text = "[ ] " .. packName .. "  0/9", Font = F_GM, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd })
+    DS.corner(packBtn, 8) DS.pad(packBtn, 10, 0, 8, 0) DS.row(packBtn)
     raidPackButtons[packName] = packBtn
     packBtn.MouseButton1Click:Connect(function()
         if raidProgress(packName) >= 9 then return end
@@ -956,9 +1352,99 @@ end
 setFishState(false)
 fTglBtn.MouseButton1Click:Connect(function() setFishState(not isFish) if SaveState then SaveState() end end)
 
-local gPnl = Instance.new("Frame", gFrame) gPnl.Size, gPnl.Position, gPnl.BackgroundColor3, gPnl.BorderSizePixel = U2(1,-20,1,-20), U2(0,10,0,10), C3(30,30,30), 0
-local gmBtn = Instance.new("TextButton", gPnl) gmBtn.Size, gmBtn.Position, gmBtn.BackgroundColor3, gmBtn.TextColor3, gmBtn.Text, gmBtn.Font, gmBtn.TextSize, gmBtn.BorderSizePixel = U2(0,240,0,40), U2(0.5,-120,0,100), C3(40,200,120), C3(255,255,255), "Start Auto-Gems", F_GB, 14, 0
-local gmStat = Instance.new("TextLabel", gPnl) gmStat.Size, gmStat.Position, gmStat.BackgroundTransparency, gmStat.TextColor3, gmStat.Text, gmStat.Font, gmStat.TextSize = U2(0,240,0,30), U2(0.5,-120,0,160), 1, C3(200,200,200), "Status: Idle", F_GM, 12
+-- AUTO TOWER (call pattern learned from a qyrix capture)
+local AutoAPI = {}
+do
+    local pg = DS.page(autoFrame)
+    local tCard = DS.card(pg, "Auto Tower", "Climbs the tower on a loop: StartTower, a burst of AttackDone, EquipBest.", 1)
+    local tStat = DS.status(tCard, "Status: Idle", 1)
+    local tDelay = DS.fullInp(tCard, "Cycle delay (seconds)", "0.15", 2, 30)
+    local tBurst = DS.dropdown(tCard, "AttackDone per cycle", { "1", "2", "3", "4", "5", "6", "8", "10" }, "3", 3)
+    local tLimit = DS.fullInp(tCard, "Stop at floor (0 = never)", "0", 4, 30)
+    local tEqBtn = DS.switch(tCard, "[X] Equip best each cycle", 5)
+    local tBtn = DS.btn(tCard, "Start Auto Tower", "ok", 6, 40)
+
+    local function save() if SaveConfig then SaveConfig() end end
+    for _, b in ipairs({ tDelay, tLimit }) do b.FocusLost:Connect(save) end
+
+    local towerRem = getRemote("Tower")
+    local tRun, tId, floor, cleared, eq = false, 0, nil, 0, true
+
+    if towerRem then
+        towerRem.OnClientEvent:Connect(function(action, a)
+            if action == "FloorCleared" then
+                floor = tonumber(a) or floor
+                cleared = cleared + 1
+                if tRun then tStat.Text = "Floor " .. tostring(floor) .. "  |  cleared " .. cleared end
+            end
+        end)
+    end
+
+    local function setTower(on)
+        if on and not towerRem then tBtn.Text = "ERR: Tower Remote Missing" return end
+        tRun = on and true or false
+        tBtn.Text = tRun and "Stop Auto Tower" or "Start Auto Tower"
+        tBtn.BackgroundColor3 = tRun and C3(200, 40, 40) or C3(40, 200, 120)
+        if not tRun then tStat.Text = "Status: Idle" return end
+        tId = tId + 1
+        local run = tId
+        cleared = 0
+        tStat.Text = "Status: Running"
+        task.spawn(function()
+            while tRun and run == tId and mFrame:IsDescendantOf(game) do
+                local n = math.clamp(math.floor(tonumber(tBurst.Text) or 3), 1, 10)
+                pcall(function() towerRem:FireServer("StartTower") end)
+                task.wait()
+                for _ = 1, 2 do pcall(function() towerRem:FireServer("AttackDone") end) end
+                if eq then pcall(function() towerRem:FireServer("EquipBest") end) end
+                task.wait()
+                for _ = 1, n do pcall(function() towerRem:FireServer("AttackDone") end) end
+                local lim = tonumber(tLimit.Text) or 0
+                if lim > 0 and floor and floor >= lim then
+                    tRun = false
+                    tBtn.Text, tBtn.BackgroundColor3 = "Start Auto Tower", C3(40, 200, 120)
+                    tStat.Text = "Stopped at floor " .. tostring(floor)
+                    if SaveState then SaveState() end
+                    break
+                end
+                task.wait(math.max(tonumber(tDelay.Text) or 0.15, 0.05))
+            end
+        end)
+    end
+
+    tEqBtn.MouseButton1Click:Connect(function()
+        eq = not eq
+        tEqBtn.Text = (eq and "[X] " or "[ ] ") .. "Equip best each cycle"
+        tEqBtn.BackgroundColor3 = eq and C3(40, 200, 120) or C3(50, 50, 50)
+        save()
+    end)
+    tBtn.MouseButton1Click:Connect(function() setTower(not tRun) if SaveState then SaveState() end end)
+    setTower(false)
+
+    AutoAPI.GetConfig = function()
+        return { delay = tDelay.Text, burst = tBurst.Text, limit = tLimit.Text, eq = eq }
+    end
+    AutoAPI.LoadConfig = function(c)
+        if not c then return end
+        if c.delay then tDelay.Text = tostring(c.delay) end
+        if c.burst then tBurst.Text = tostring(c.burst) end
+        if c.limit then tLimit.Text = tostring(c.limit) end
+        if c.eq ~= nil then
+            eq = c.eq
+            tEqBtn.Text = (eq and "[X] " or "[ ] ") .. "Equip best each cycle"
+            tEqBtn.BackgroundColor3 = eq and C3(40, 200, 120) or C3(50, 50, 50)
+        end
+    end
+    AutoAPI.GetState = function() return { tower = tRun } end
+    AutoAPI.LoadState = function(st)
+        if not st then return end
+        if st.tower ~= nil and st.tower ~= tRun then setTower(st.tower) end
+    end
+end
+
+local gPnl = DS.card(DS.page(gFrame), "Auto Gems", "Sweeps every gallery page and collects gems on a loop.", 1)
+local gmBtn = DS.btn(gPnl, "Start Auto-Gems", "ok", 1, 40)
+local gmStat = DS.status(gPnl, "Status: Idle", 2)
 local isGems, GalEvt, CardEvt = false, getRemote("Gallery"), getRemote("Card")
 local function setGemsState(state)
     isGems = state and GalEvt ~= nil and CardEvt ~= nil
@@ -979,11 +1465,8 @@ gmBtn.MouseButton1Click:Connect(function() setGemsState(not isGems) if SaveState
 local GraderAPI = {}
 
 local function bGrader(pFrame, sData, pcData, rName, aName, gList, gRanks)
-    local lPnl = Instance.new("Frame", pFrame) lPnl.Size, lPnl.Position, lPnl.BackgroundColor3, lPnl.BorderSizePixel = U2(0,230,1,-20), U2(0,10,0,10), C3(30,30,30), 0
-    local saBtn = Instance.new("TextButton", lPnl) saBtn.Size, saBtn.BackgroundColor3, saBtn.TextColor3, saBtn.Text, saBtn.Font, saBtn.TextSize, saBtn.BorderSizePixel = U2(0.5,0,0,25), C3(40,40,40), C3(255,255,255), "Select All", F_GM, 12, 0
-    local daBtn = Instance.new("TextButton", lPnl) daBtn.Size, daBtn.Position, daBtn.BackgroundColor3, daBtn.TextColor3, daBtn.Text, daBtn.Font, daBtn.TextSize, daBtn.BorderSizePixel = U2(0.5,0,0,25), U2(0.5,0,0,0), C3(40,40,40), C3(255,255,255), "Deselect All", F_GM, 12, 0
-    local pScr = Instance.new("ScrollingFrame", lPnl) pScr.Size, pScr.Position, pScr.BackgroundColor3, pScr.ScrollBarThickness, pScr.BorderSizePixel = U2(1,0,1,-25), U2(0,0,0,25), C3(25,25,25), 6, 0
-    local sLyt = Instance.new("UIListLayout", pScr) sLyt.SortOrder = Enum.SortOrder.LayoutOrder sLyt:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() pScr.CanvasSize = U2(0,0,0,sLyt.AbsoluteContentSize.Y) end)
+    local lPnl, rPnl = DS.split(pFrame, 230)
+    local saBtn, daBtn, pScr, sLyt = DS.tree(lPnl)
     
     local SData = {}
     local CardBtnMap = {}
@@ -1008,16 +1491,10 @@ local function bGrader(pFrame, sData, pcData, rName, aName, gList, gRanks)
 
     for lIdx, pD in ipairs(sData) do
         local pN = pD.Name SData[pN] = { isSelected = false, items = {} }
-        local pC = Instance.new("Frame", pScr) pC.Size, pC.BackgroundTransparency, pC.LayoutOrder, pC.AutomaticSize = U2(1,0,0,25), 1, lIdx, Enum.AutomaticSize.Y
-        local cLyt = Instance.new("UIListLayout", pC) cLyt.SortOrder = Enum.SortOrder.LayoutOrder
-        local pH = Instance.new("Frame", pC) pH.Size, pH.BackgroundColor3, pH.BorderSizePixel, pH.LayoutOrder = U2(1,0,0,25), C3(30,30,30), 0, 1
-        local eBtn = Instance.new("TextButton", pH) eBtn.Size, eBtn.BackgroundColor3, eBtn.TextColor3, eBtn.Text, eBtn.Font, eBtn.BorderSizePixel = U2(0,25,0,25), C3(35,35,35), C3(200,200,200), "+", F_GB, 0
-        local cBtn = Instance.new("TextButton", pH) cBtn.Size, cBtn.Position, cBtn.BackgroundTransparency, cBtn.TextColor3, cBtn.Text, cBtn.Font, cBtn.TextSize, cBtn.TextXAlignment = U2(1,-25,1,0), U2(0,25,0,0), 1, C3(200,200,200), " [ ] "..pN, F_GM, 12, Enum.TextXAlignment.Left
-        local iF = Instance.new("Frame", pC) iF.Size, iF.BackgroundTransparency, iF.Visible, iF.LayoutOrder, iF.AutomaticSize = U2(1,0,0,0), 1, false, 2, Enum.AutomaticSize.Y
-        Instance.new("UIListLayout", iF) local iBtns = {} SData[pN].cBtn = cBtn
+        local pC, eBtn, cBtn, iF = DS.pack(pScr, lIdx, pN) local iBtns = {} SData[pN].cBtn = cBtn
         if pcData[pN] then for _, iN in ipairs(pcData[pN]) do
             SData[pN].items[iN] = false
-            local ib = Instance.new("TextButton", iF) ib.Size, ib.BackgroundColor3, ib.TextColor3, ib.Text, ib.Font, ib.TextSize, ib.TextXAlignment, ib.BorderSizePixel = U2(1,0,0,20), C3(20,20,20), C3(150,150,150), "   ↳ [ ] "..iN, F_GM, 11, Enum.TextXAlignment.Left, 0
+            local ib = DS.item(iF, "   ↳ [ ] "..iN, 11)
             CardBtnMap[iN] = ib
             ib.MouseButton1Click:Connect(function()
                 local s = not SData[pN].items[iN] SData[pN].items[iN] = s
@@ -1038,25 +1515,26 @@ local function bGrader(pFrame, sData, pcData, rName, aName, gList, gRanks)
     saBtn.MouseButton1Click:Connect(function() for _, pd in pairs(SData) do pd.updateUI(true) end if SaveState then SaveState() end end)
     daBtn.MouseButton1Click:Connect(function() for _, pd in pairs(SData) do pd.updateUI(false) end if SaveState then SaveState() end end)
     
-    local rPnl = Instance.new("Frame", pFrame) rPnl.Size, rPnl.Position, rPnl.BackgroundTransparency = U2(1,-250,1,-20), U2(0,250,0,10), 1
-    local sLbl = Instance.new("TextLabel", rPnl) sLbl.Size, sLbl.BackgroundColor3, sLbl.TextColor3, sLbl.Text, sLbl.Font, sLbl.TextSize, sLbl.BorderSizePixel = U2(1,0,0,25), C3(20,20,20), C3(200,200,200), "Status: Idle", F_GM, 12, 0
-    
+    local sLbl = DS.status(rPnl, "Status: Idle", 0)
+
     local selG = "UR"
-    local tgBtn = Instance.new("TextButton", rPnl) tgBtn.Size, tgBtn.Position, tgBtn.BackgroundColor3, tgBtn.TextColor3, tgBtn.Font, tgBtn.TextSize, tgBtn.BorderSizePixel = U2(1,0,0,35), U2(0,0,0,40), C3(40,40,40), C3(255,200,0), F_GB, 14, 0
-    local gScr = Instance.new("ScrollingFrame", rPnl) gScr.Size, gScr.Position, gScr.BackgroundColor3, gScr.ScrollBarThickness, gScr.Visible, gScr.ZIndex, gScr.BorderSizePixel = U2(1,0,0,120), U2(0,0,0,75), C3(20,20,20), 6, false, 10, 0
-    local gY = 0 tgBtn.Text = "Target: "..selG
-    for _, g in ipairs(gList) do
-        local b = Instance.new("TextButton", gScr) b.Size, b.Position, b.BackgroundColor3, b.TextColor3, b.Text, b.Font, b.ZIndex, b.BorderSizePixel = U2(1,-10,0,30), U2(0,0,0,gY), C3(30,30,30), C3(255,255,255), g, F_GM, 11, 0
-        b.MouseButton1Click:Connect(function() selG = g tgBtn.Text = "Target: "..g gScr.Visible = false if SaveConfig then SaveConfig() end end) gY = gY+30
+    local tgBtn = DS.new("TextButton", rPnl, { Size = U2(1, 0, 0, 36), BackgroundColor3 = T.surface3, TextColor3 = T.amber, Font = F_GB, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = 10, Text = "Target: " .. selG })
+    DS.corner(tgBtn, 8) DS.pad(tgBtn, 12, 0, 12, 0)
+    local gScr = DS.new("ScrollingFrame", rPnl, { Size = U2(1, 0, 0, 132), BackgroundColor3 = T.surface2, Visible = false, LayoutOrder = 11, ScrollBarThickness = 3, ScrollBarImageColor3 = T.stroke, AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = U2(0, 0, 0, 0) })
+    DS.corner(gScr, 8) DS.stroke(gScr) DS.pad(gScr, 4, 4, 4, 4) DS.vlist(gScr, 2)
+    for gi = #gList, 1, -1 do
+        local g = gList[gi]
+        local b = DS.new("TextButton", gScr, { Size = U2(1, 0, 0, 28), BackgroundColor3 = T.surface3, Text = g, Font = F_GM, TextSize = 12, TextColor3 = T.text, LayoutOrder = #gList - gi })
+        DS.corner(b, 6)
+        b.MouseButton1Click:Connect(function() selG = g tgBtn.Text = "Target: "..g gScr.Visible = false if SaveConfig then SaveConfig() end end)
     end
-    gScr.CanvasSize = U2(0,0,0,gY)
     tgBtn.MouseButton1Click:Connect(function() gScr.Visible = not gScr.Visible end)
-    
-    local cTypeLbl = Instance.new("TextLabel", rPnl) cTypeLbl.Size, cTypeLbl.Position, cTypeLbl.BackgroundColor3, cTypeLbl.TextColor3, cTypeLbl.Text, cTypeLbl.Font, cTypeLbl.TextSize, cTypeLbl.BorderSizePixel = U2(1,0,0,30), U2(0,0,0,100), C3(40,120,60), C3(255,255,255), "Currency: Cash Only", F_GB, 13, 0
-    local anBtn = Instance.new("TextButton", rPnl) anBtn.Size, anBtn.Position, anBtn.BackgroundColor3, anBtn.TextColor3, anBtn.Text, anBtn.Font, anBtn.TextSize, anBtn.BorderSizePixel = U2(1,0,0,30), U2(0,0,0,140), C3(40,200,120), C3(255,255,255), "[X] Auto Next Item", F_GB, 13, 0
-    local apBtn = Instance.new("TextButton", rPnl) apBtn.Size, apBtn.Position, apBtn.BackgroundColor3, apBtn.TextColor3, apBtn.Text, apBtn.Font, apBtn.TextSize, apBtn.BorderSizePixel = U2(1,0,0,30), U2(0,0,0,180), C3(40,200,120), C3(255,255,255), "[X] Auto Next Pack", F_GB, 13, 0
-    
-    local fBtn = Instance.new("TextButton", rPnl) fBtn.Size, fBtn.Position, fBtn.BackgroundColor3, fBtn.TextColor3, fBtn.Text, fBtn.Font, fBtn.TextSize, fBtn.BorderSizePixel = U2(1,0,0,30), U2(0,0,0,220), C3(120,40,120), C3(255,255,255), "Filter Missing Grades", F_GB, 13, 0
+
+    local cTypeLbl = DS.chip(rPnl, "Currency: Cash Only", 20)
+    local anBtn = DS.switch(rPnl, "[X] Auto Next Item", 30)
+    local apBtn = DS.switch(rPnl, "[X] Auto Next Pack", 40)
+
+    local fBtn = DS.btn(rPnl, "Filter Missing Grades", "accent", 50, 36)
     fBtn.MouseButton1Click:Connect(function()
         local tr = gRanks[selG] or 10
         for pN, pD in pairs(SData) do
@@ -1073,7 +1551,7 @@ local function bGrader(pFrame, sData, pcData, rName, aName, gList, gRanks)
     
     local dInp = mkFullInp(rPnl, "Delay (ms)", "300", 255, 30)
     dInp.FocusLost:Connect(function() if SaveConfig then SaveConfig() end end)
-    local sgBtn = Instance.new("TextButton", rPnl) sgBtn.Size, sgBtn.Position, sgBtn.BackgroundColor3, sgBtn.TextColor3, sgBtn.Text, sgBtn.Font, sgBtn.TextSize, sgBtn.BorderSizePixel = U2(1,0,0,40), U2(0,0,0,315), C3(40,200,120), C3(255,255,255), "Start Grader", F_GB, 14, 0
+    local sgBtn = DS.btn(rPnl, "Start Grader", "ok", 315, 40)
     
     local anC, anP = true, true
     anBtn.MouseButton1Click:Connect(function() anC = not anC anBtn.Text, anBtn.BackgroundColor3 = anC and "[X] Auto Next Item" or "[ ] Auto Next Item", anC and C3(40,200,120) or C3(50,50,50) if SaveConfig then SaveConfig() end end)
@@ -1249,11 +1727,8 @@ bGrader(cFrame, CardSortedPacks, CardPackCards, "Grade", "Roll", GRADE_LIST, GRA
 local TowerAPI = {}
 
 local function bTraitRoller(pFrame, sData, pcData)
-    local lPnl = Instance.new("Frame", pFrame) lPnl.Size, lPnl.Position, lPnl.BackgroundColor3, lPnl.BorderSizePixel = U2(0,230,1,-20), U2(0,10,0,10), C3(30,30,30), 0
-    local saBtn = Instance.new("TextButton", lPnl) saBtn.Size, saBtn.BackgroundColor3, saBtn.TextColor3, saBtn.Text, saBtn.Font, saBtn.TextSize, saBtn.BorderSizePixel = U2(0.5,0,0,25), C3(40,40,40), C3(255,255,255), "Select All", F_GM, 12, 0
-    local daBtn = Instance.new("TextButton", lPnl) daBtn.Size, daBtn.Position, daBtn.BackgroundColor3, daBtn.TextColor3, daBtn.Text, daBtn.Font, daBtn.TextSize, daBtn.BorderSizePixel = U2(0.5,0,0,25), U2(0.5,0,0,0), C3(40,40,40), C3(255,255,255), "Deselect All", F_GM, 12, 0
-    local pScr = Instance.new("ScrollingFrame", lPnl) pScr.Size, pScr.Position, pScr.BackgroundColor3, pScr.ScrollBarThickness, pScr.BorderSizePixel = U2(1,0,1,-25), U2(0,0,0,25), C3(25,25,25), 6, 0
-    local sLyt = Instance.new("UIListLayout", pScr) sLyt.SortOrder = Enum.SortOrder.LayoutOrder sLyt:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() pScr.CanvasSize = U2(0,0,0,sLyt.AbsoluteContentSize.Y) end)
+    local lPnl, rPnl = DS.split(pFrame, 230)
+    local saBtn, daBtn, pScr, sLyt = DS.tree(lPnl)
     
     local SData = {}
     local CardBtnMap = {}
@@ -1262,10 +1737,12 @@ local function bTraitRoller(pFrame, sData, pcData)
         for _, collection in ipairs({ "TowerCards", "Cards" }) do
             local record = getLiveRecord(collection, cardName)
             if record then
-                return " | " .. tostring(record.Grade or "?") .. " | " .. tostring(record.Trait or "?")
+                local mut = record.Mutation and tostring(record.Mutation) or ""
+                if mut == "Regular" then mut = "" end
+                return "\t" .. (exactGrade(record.Grade) or "") .. "\t" .. tostring(record.Trait or "") .. "\t" .. mut
             end
         end
-        return " | ? | ?"
+        return "\t\tnot owned"
     end
 
     local function uncheckCard(packName, cardName)
@@ -1284,16 +1761,10 @@ local function bTraitRoller(pFrame, sData, pcData)
 
     for lIdx, pD in ipairs(sData) do
         local pN = pD.Name SData[pN] = { isSelected = false, items = {} }
-        local pC = Instance.new("Frame", pScr) pC.Size, pC.BackgroundTransparency, pC.LayoutOrder, pC.AutomaticSize = U2(1,0,0,25), 1, lIdx, Enum.AutomaticSize.Y
-        local cLyt = Instance.new("UIListLayout", pC) cLyt.SortOrder = Enum.SortOrder.LayoutOrder
-        local pH = Instance.new("Frame", pC) pH.Size, pH.BackgroundColor3, pH.BorderSizePixel, pH.LayoutOrder = U2(1,0,0,25), C3(30,30,30), 0, 1
-        local eBtn = Instance.new("TextButton", pH) eBtn.Size, eBtn.BackgroundColor3, eBtn.TextColor3, eBtn.Text, eBtn.Font, eBtn.BorderSizePixel = U2(0,25,0,25), C3(35,35,35), C3(200,200,200), "+", F_GB, 0
-        local cBtn = Instance.new("TextButton", pH) cBtn.Size, cBtn.Position, cBtn.BackgroundTransparency, cBtn.TextColor3, cBtn.Text, cBtn.Font, cBtn.TextSize, cBtn.TextXAlignment = U2(1,-25,1,0), U2(0,25,0,0), 1, C3(200,200,200), " [ ] "..pN, F_GM, 12, Enum.TextXAlignment.Left
-        local iF = Instance.new("Frame", pC) iF.Size, iF.BackgroundTransparency, iF.Visible, iF.LayoutOrder, iF.AutomaticSize = U2(1,0,0,0), 1, false, 2, Enum.AutomaticSize.Y
-        Instance.new("UIListLayout", iF) local iBtns = {} SData[pN].cBtn = cBtn
+        local pC, eBtn, cBtn, iF = DS.pack(pScr, lIdx, pN) local iBtns = {} SData[pN].cBtn = cBtn
         if pcData[pN] then for _, iN in ipairs(pcData[pN]) do
             SData[pN].items[iN] = false
-            local ib = Instance.new("TextButton", iF) ib.Size, ib.BackgroundColor3, ib.TextColor3, ib.Text, ib.Font, ib.TextSize, ib.TextXAlignment, ib.BorderSizePixel = U2(1,0,0,20), C3(20,20,20), C3(150,150,150), "   ↳ [ ] "..iN..towerSummary(iN), F_GM, 11, Enum.TextXAlignment.Left, 0
+            local ib = DS.item(iF, "   ↳ [ ] "..iN..towerSummary(iN), 11)
             CardBtnMap[iN] = ib
             ib.MouseButton1Click:Connect(function()
                 local s = not SData[pN].items[iN] SData[pN].items[iN] = s
@@ -1314,8 +1785,7 @@ local function bTraitRoller(pFrame, sData, pcData)
     saBtn.MouseButton1Click:Connect(function() for _, pd in pairs(SData) do pd.updateUI(true) end if SaveState then SaveState() end end)
     daBtn.MouseButton1Click:Connect(function() for _, pd in pairs(SData) do pd.updateUI(false) end if SaveState then SaveState() end end)
     
-    local rPnl = Instance.new("Frame", pFrame) rPnl.Size, rPnl.Position, rPnl.BackgroundTransparency = U2(1,-250,1,-20), U2(0,250,0,10), 1
-    local sLbl = Instance.new("TextLabel", rPnl) sLbl.Size, sLbl.BackgroundColor3, sLbl.TextColor3, sLbl.Text, sLbl.Font, sLbl.TextSize, sLbl.BorderSizePixel = U2(1,0,0,25), C3(20,20,20), C3(200,200,200), "Status: Idle", F_GM, 12, 0
+    local sLbl = DS.status(rPnl, "Status: Idle", 0)
     
     local towerTraits = {}
     pcall(function()
@@ -1324,12 +1794,12 @@ local function bTraitRoller(pFrame, sData, pcData)
     end)
     local tInp = mkDropdown(rPnl, "Target Tower Trait", towerTraits, towerTraits[1], 40, 260)
     
-    local anBtn = Instance.new("TextButton", rPnl) anBtn.Size, anBtn.Position, anBtn.BackgroundColor3, anBtn.TextColor3, anBtn.Text, anBtn.Font, anBtn.TextSize, anBtn.BorderSizePixel = U2(1,0,0,30), U2(0,0,0,110), C3(40,200,120), C3(255,255,255), "[X] Auto Next Item", F_GB, 13, 0
-    local apBtn = Instance.new("TextButton", rPnl) apBtn.Size, apBtn.Position, apBtn.BackgroundColor3, apBtn.TextColor3, apBtn.Text, apBtn.Font, apBtn.TextSize, apBtn.BorderSizePixel = U2(1,0,0,30), U2(0,0,0,150), C3(40,200,120), C3(255,255,255), "[X] Auto Next Pack", F_GB, 13, 0
+    local anBtn = DS.switch(rPnl, "[X] Auto Next Item", 110)
+    local apBtn = DS.switch(rPnl, "[X] Auto Next Pack", 150)
     local dInp = mkFullInp(rPnl, "Delay (ms)", "300", 255, 30)
     dInp.FocusLost:Connect(function() if SaveConfig then SaveConfig() end end)
     
-    local stBtn = Instance.new("TextButton", rPnl) stBtn.Size, stBtn.Position, stBtn.BackgroundColor3, stBtn.TextColor3, stBtn.Text, stBtn.Font, stBtn.TextSize, stBtn.BorderSizePixel = U2(1,0,0,40), U2(0,0,0,315), C3(40,200,120), C3(255,255,255), "Start Roller", F_GB, 14, 0
+    local stBtn = DS.btn(rPnl, "Start Roller", "ok", 315, 40)
     
     local anC, anP = true, true
     anBtn.MouseButton1Click:Connect(function() anC = not anC anBtn.Text, anBtn.BackgroundColor3 = anC and "[X] Auto Next Item" or "[ ] Auto Next Item", anC and C3(40,200,120) or C3(50,50,50) if SaveConfig then SaveConfig() end end)
@@ -1498,22 +1968,423 @@ end
 bTraitRoller(tFrame, CardSortedPacks, CardPackCards)
 
 -- ==========================================
+-- 7b. STAR TRIAL: card/pack queue, live stars, scan, concurrent trials
+-- ==========================================
+local StarAPI = {}
+local MAX_STAR = 5
+
+local TRIAL_DIFFICULTIES = { "Easy", "Medium", "Hard", "Extreme", "Nightmare" }
+
+local function bStarTrial(pFrame, sData, pcData)
+    local lPnl, rPnl = DS.split(pFrame, 300)
+    local saBtn, daBtn, pScr = DS.tree(lPnl)
+    local SData = {}
+    local failed, done = {}, {}
+
+    local function infoOf(name)
+        local r = getLiveRecord("Cards", name)
+        if not r then return nil end
+        return {
+            star = tonumber(r.Star) or 0,
+            grade = exactGrade(r.Grade) or (r.Grade and stripTags(tostring(r.Grade))) or "",
+            mut = r.Mutation and tostring(r.Mutation) or "Regular",
+            trait = r.Trait and tostring(r.Trait) or "",
+        }
+    end
+    local function rowText(name, on)
+        local i = infoOf(name)
+        local tail = i and ("\t" .. i.grade .. "\t★" .. i.star .. "\t" .. (i.mut ~= "Regular" and i.mut or "") .. "\t" .. i.trait) or "\t\tnot owned"
+        local tag = failed[name] and "\t✗ failed" or (done[name] and "\t✓ done" or "")
+        return "   ↳ " .. (on and "[X] " or "[ ] ") .. name .. tail .. tag
+    end
+    local function paintPack(pN)
+        local d = SData[pN]
+        local any = false
+        for _, v in pairs(d.items) do if v then any = true break end end
+        d.isSelected = any
+        d.cBtn.Text = (any and " [X] " or " [ ] ") .. pN
+        d.cBtn.TextColor3 = any and C3(40, 200, 120) or C3(200, 200, 200)
+    end
+    local function setItem(pN, iN, on)
+        local d = SData[pN]
+        if on and (failed[iN] or done[iN]) then on = false end -- failed / completed cards cannot be selected
+        d.items[iN] = on and true or false
+        local b = d.btns[iN]
+        b.Text = rowText(iN, d.items[iN])
+        b.TextColor3 = failed[iN] and C3(220, 70, 70) or done[iN] and C3(96, 165, 250) or (d.items[iN] and C3(40, 200, 120) or C3(150, 150, 150))
+    end
+    local function setPack(pN, on)
+        for iN in pairs(SData[pN].items) do setItem(pN, iN, on) end
+        paintPack(pN)
+    end
+    local function refreshPack(pN)
+        local d = SData[pN]
+        for iN, b in pairs(d.btns) do
+            local txt = rowText(iN, d.items[iN])
+            if b.Text ~= txt then b.Text = txt end
+        end
+    end
+
+    -- kind: "done" (star went up), "failed" (upgrade did not work) or nil to clear
+    local function markStatus(card, kind)
+        failed[card], done[card] = nil, nil
+        if kind == "done" then done[card] = true elseif kind == "failed" then failed[card] = true end
+        for pN, d in pairs(SData) do
+            if d.items[card] ~= nil then
+                if kind then d.items[card] = false end
+                setItem(pN, card, d.items[card])
+                paintPack(pN)
+            end
+        end
+    end
+
+    for lIdx, pD in ipairs(sData) do
+        local pN = pD.Name
+        local pC, eBtn, cBtn, iF = DS.pack(pScr, lIdx, pN)
+        SData[pN] = { items = {}, btns = {}, isSelected = false, cBtn = cBtn, iF = iF, maxed = false }
+        for _, iN in ipairs(pcData[pN] or {}) do
+            SData[pN].items[iN] = false
+            local ib = DS.item(iF, rowText(iN, false), 11)
+            ib.TextColor3 = C3(150, 150, 150)
+            SData[pN].btns[iN] = ib
+            ib.MouseButton1Click:Connect(function()
+                setItem(pN, iN, not SData[pN].items[iN]) paintPack(pN)
+                if SaveState then SaveState() end
+            end)
+        end
+        eBtn.MouseButton1Click:Connect(function()
+            iF.Visible = not iF.Visible eBtn.Text = iF.Visible and "-" or "+"
+            if iF.Visible then refreshPack(pN) end
+        end)
+        cBtn.MouseButton1Click:Connect(function() setPack(pN, not SData[pN].isSelected) if SaveState then SaveState() end end)
+    end
+    saBtn.MouseButton1Click:Connect(function() for pN in pairs(SData) do setPack(pN, true) end if SaveState then SaveState() end end)
+    daBtn.MouseButton1Click:Connect(function() for pN in pairs(SData) do setPack(pN, false) end if SaveState then SaveState() end end)
+
+    -- scan: grays out cards at max stars and packs where every card is at max stars
+    local function scanAll()
+        local needPacks, maxedPacks, needCards = 0, 0, 0
+        for _, pD in ipairs(sData) do
+            local pN = pD.Name
+            local d = SData[pN]
+            local total, maxed = 0, 0
+            for _, iN in ipairs(pcData[pN] or {}) do
+                total = total + 1
+                local i = infoOf(iN)
+                local m = i ~= nil and i.star >= MAX_STAR
+                if m then maxed = maxed + 1 elseif i then needCards = needCards + 1 end
+                local want = m and 0.6 or 0
+                if d.btns[iN].TextTransparency ~= want then d.btns[iN].TextTransparency = want end
+            end
+            d.maxed = total > 0 and maxed == total
+            local want = d.maxed and 0.6 or 0
+            if d.cBtn.TextTransparency ~= want then d.cBtn.TextTransparency = want end
+            if d.maxed then maxedPacks = maxedPacks + 1 elseif total > 0 then needPacks = needPacks + 1 end
+            if d.iF.Visible then refreshPack(pN) end
+        end
+        return needPacks, maxedPacks, needCards
+    end
+
+    -- controls
+    local sLbl = DS.status(rPnl, "Status: Idle", 1)
+    local scanBtn = DS.btn(rPnl, "Scan Packs", "info", 2, 36)
+    local selBtn = DS.btn(rPnl, "Scan & Select Unmaxed", "accent", 3, 36)
+    local scanLbl = DS.status(rPnl, "Scan: not run yet (maxed cards and packs are grayed out)", 4)
+    local diffInp = DS.dropdown(rPnl, "Difficulty", TRIAL_DIFFICULTIES, "Hard", 5)
+    local concInp = DS.dropdown(rPnl, "Concurrent trials (experimental)", { "1", "2", "3", "4", "5" }, "1", 6)
+    local everyInp = DS.fullInp(rPnl, "Retry Start every (seconds)", "3", 7, 30)
+    local skipInp = DS.dropdown(rPnl, "Skip cards at ★ or higher", { "Off", "1", "2", "3", "4", "5" }, "5", 8)
+    local giveInp = DS.dropdown(rPnl, "Mark card failed after (trials without a star)", { "1", "2", "3", "5", "10", "Unlimited" }, "1", 9)
+    local instBtn = DS.switch(rPnl, "[X] Instant AttackDone", 10)
+    local stBtn = DS.btn(rPnl, "Start Star Trials", "ok", 11, 40)
+    local upBtn = DS.btn(rPnl, "Send Star Upgrade (selected cards)", "info", 12, 36)
+    local clearBtn = DS.btn(rPnl, "Clear Done / Failed Marks", nil, 13, 34)
+    everyInp.FocusLost:Connect(function() if SaveConfig then SaveConfig() end end)
+
+    local function scanText(np, mp, nc)
+        return string.format("Scan: %d packs still need stars, %d packs fully ★%d (grayed out), %d owned cards below ★%d", np, mp, MAX_STAR, nc, MAX_STAR)
+    end
+    scanBtn.MouseButton1Click:Connect(function()
+        local np, mp, nc = scanAll()
+        scanLbl.Text = scanText(np, mp, nc)
+    end)
+    selBtn.MouseButton1Click:Connect(function()
+        local np, mp, nc = scanAll()
+        local picked = 0
+        for _, pD in ipairs(sData) do
+            local pN = pD.Name
+            for _, iN in ipairs(pcData[pN] or {}) do
+                local i = infoOf(iN)
+                local on = i ~= nil and i.star < MAX_STAR and not failed[iN] and not done[iN]
+                setItem(pN, iN, on)
+                if on then picked = picked + 1 end
+            end
+            paintPack(pN)
+        end
+        scanLbl.Text = scanText(np, mp, nc) .. " | selected " .. picked
+        if SaveState then SaveState() end
+    end)
+
+    local trialRem = getRemote("StarTrial")
+    local running, runId, instant = false, 0, true
+    local activeAt, startedAt, sent, fights, stages, fightT, times = {}, {}, 0, 0, 0, nil, {}
+    local wasActive, tries, upgrades, lastOther, verifying, evoAt = {}, {}, 0, nil, {}, {}
+    local KNOWN = { StartFight = true, Attack = true, EnemyDefeated = true, StageCleared = true, EvolutionSuccess = true }
+    local ACTIVE_FOR = 8
+
+    local function sendUpgrade(card)
+        if trialRem then pcall(function() trialRem:FireServer("Star", card) end) end
+    end
+    local function maxTries() return tonumber(giveInp.Text) or 0 end
+
+    -- sends the upgrade and waits for either EvolutionSuccess or a higher star count
+    local function attemptUpgrade(card)
+        local i0 = infoOf(card)
+        local before = i0 and i0.star or 0
+        evoAt[card] = nil
+        sendUpgrade(card)
+        local t0 = os.clock()
+        while os.clock() - t0 < 3 do
+            local i = infoOf(card)
+            if evoAt[card] or (i and i.star > before) then return true end
+            task.wait(0.25)
+        end
+        return false
+    end
+    -- upgrade attempts for a batch (already-won trials); only successes are marked, nothing is marked failed
+    local function cashIn(list)
+        local before = {}
+        for _, c in ipairs(list) do
+            local i = infoOf(c)
+            before[c] = i and i.star or 0
+            evoAt[c] = nil
+            sendUpgrade(c)
+            task.wait(0.05)
+        end
+        task.wait(1.5)
+        local n = 0
+        for _, c in ipairs(list) do
+            local i = infoOf(c)
+            if evoAt[c] or (i and i.star > before[c]) then markStatus(c, "done") n = n + 1 end
+        end
+        if n > 0 and SaveState then SaveState() end
+        return n
+    end
+    -- a trial just finished: attempt the upgrade, success = complete, failure = red and out of the queue
+    local function verifyAfterTrial(card)
+        verifying[card] = true
+        local ok = attemptUpgrade(card)
+        verifying[card] = nil
+        if ok then
+            markStatus(card, "done")
+        else
+            tries[card] = (tries[card] or 0) + 1
+            local limit = maxTries()
+            if limit > 0 and tries[card] >= limit then markStatus(card, "failed") end
+        end
+        if SaveState then SaveState() end
+    end
+
+    if trialRem then
+        trialRem.OnClientEvent:Connect(function(action, a)
+            local t = os.clock()
+            if action == "StartFight" then
+                local mine = type(a) == "table" and a.Card
+                if mine then activeAt[mine] = t end
+                fightT = t
+            elseif action == "Attack" then
+                if running and instant then pcall(function() trialRem:FireServer("AttackDone", a) end) end
+            elseif action == "EnemyDefeated" then
+                if fightT then
+                    times[#times + 1] = t - fightT
+                    if #times > 15 then table.remove(times, 1) end
+                    fights = fights + 1
+                    fightT = nil
+                end
+            elseif action == "StageCleared" then
+                stages = stages + 1
+            elseif action == "EvolutionSuccess" then
+                upgrades = upgrades + 1
+                if type(a) == "string" then
+                    tries[a] = 0
+                    evoAt[a] = t
+                    markStatus(a, "done")
+                    if SaveState then SaveState() end
+                end
+            end
+            if not KNOWN[action] then lastOther = tostring(action) end
+        end)
+    end
+
+    local function queue()
+        local out, seen = {}, {}
+        local skip = tonumber(skipInp.Text) or 0
+        for _, pD in ipairs(sData) do
+            local d = SData[pD.Name]
+            for _, iN in ipairs(pcData[pD.Name] or {}) do
+                if d.items[iN] and not seen[iN] then
+                    seen[iN] = true
+                    local i = infoOf(iN)
+                    local limit = maxTries()
+                    local stuck = limit > 0 and (tries[iN] or 0) >= limit
+                    if i and not stuck and not failed[iN] and not done[iN] and not (skip > 0 and i.star >= skip) then out[#out + 1] = iN end
+                end
+            end
+        end
+        return out
+    end
+
+    local function startTrial(card)
+        startedAt[card] = os.clock()
+        sent = sent + 1
+        pcall(function() trialRem:FireServer("AutoQueue", true, {}) end)
+        pcall(function() trialRem:FireServer("Start", diffInp.Text, card) end)
+        pcall(function() trialRem:FireServer("AFK", false) end)
+    end
+
+    local function setRunning(on)
+        if on and not trialRem then stBtn.Text = "ERR: StarTrial Remote Missing" return end
+        local was = running
+        running = on and true or false
+        stBtn.Text = running and "Stop Star Trials" or "Start Star Trials"
+        stBtn.BackgroundColor3 = running and C3(200, 40, 40) or C3(40, 200, 120)
+        if not running then
+            sLbl.Text = "Status: Idle"
+            if was and trialRem then pcall(function() trialRem:FireServer("AutoQueue", false, {}) end) end
+            return
+        end
+        runId = runId + 1
+        local run = runId
+        tries, wasActive = {}, {}
+        task.spawn(function()
+            -- cash in any trial that was already won but not upgraded yet
+            cashIn(queue())
+            while running and run == runId and mFrame:IsDescendantOf(game) do
+                local now = os.clock()
+                local list = queue()
+                local want = math.clamp(math.floor(tonumber(concInp.Text) or 1), 1, 5)
+                local every = math.max(tonumber(everyInp.Text) or 3, 1)
+                local busy, idle, live = 0, {}, {}
+                for i, c in ipairs(list) do
+                    local isActive = activeAt[c] and now - activeAt[c] < ACTIVE_FOR
+                    local isPending = startedAt[c] and now - startedAt[c] < every
+                    if isActive then wasActive[c] = true
+                    elseif wasActive[c] then
+                        -- the trial just ended: try the star upgrade, count it as an attempt (an EvolutionSuccess resets the count)
+                        wasActive[c] = false
+                        task.spawn(verifyAfterTrial, c)
+                    end
+                    if isActive then busy = busy + 1 live[#live + 1] = c
+                    elseif verifying[c] or isPending then busy = busy + 1
+                    else idle[#idle + 1] = { c = c, t = startedAt[c] or -1e9, i = i } end
+                end
+                table.sort(idle, function(x, y) if x.t ~= y.t then return x.t < y.t end return x.i < y.i end)
+                for _, e in ipairs(idle) do
+                    if busy >= want then break end
+                    startTrial(e.c)
+                    busy = busy + 1
+                end
+                local avg = 0
+                for _, v in ipairs(times) do avg = avg + v end
+                avg = #times > 0 and avg / #times or 0
+                local nDone, nFailed = 0, 0
+                for _ in pairs(done) do nDone = nDone + 1 end
+                for _ in pairs(failed) do nFailed = nFailed + 1 end
+                if #list == 0 then
+                    sLbl.Text = string.format("Running | no eligible owned cards selected | done %d | failed %d", nDone, nFailed)
+                else
+                    sLbl.Text = string.format("Running | queue %d | in trial: %s | fights %d | upgrades %d | done %d | failed %d | avg fight %.2fs",
+                        #list, #live > 0 and table.concat(live, ", ") or "-", fights, upgrades, nDone, nFailed, avg)
+                end
+                if lastOther then sLbl.Text = sLbl.Text .. " | other event: " .. lastOther end
+                task.wait(0.5)
+            end
+        end)
+    end
+
+    instBtn.MouseButton1Click:Connect(function()
+        instant = not instant
+        instBtn.Text = (instant and "[X] " or "[ ] ") .. "Instant AttackDone"
+        instBtn.BackgroundColor3 = instant and C3(40, 200, 120) or C3(50, 50, 50)
+        if SaveConfig then SaveConfig() end
+    end)
+    stBtn.MouseButton1Click:Connect(function() setRunning(not running) if SaveState then SaveState() end end)
+    upBtn.MouseButton1Click:Connect(function()
+        task.spawn(function()
+            local list = queue()
+            scanLbl.Text = "Sending star upgrade for " .. #list .. " selected cards..."
+            local n = cashIn(list)
+            scanLbl.Text = "Star upgrade sent for " .. #list .. " cards, " .. n .. " completed"
+        end)
+    end)
+    clearBtn.MouseButton1Click:Connect(function()
+        local names = {}
+        for c in pairs(failed) do names[#names + 1] = c end
+        for c in pairs(done) do names[#names + 1] = c end
+        for _, c in ipairs(names) do markStatus(c, nil) tries[c] = nil end
+        scanLbl.Text = "Cleared " .. #names .. " marks"
+        if SaveState then SaveState() end
+    end)
+    setRunning(false)
+
+    -- keep stars, gray-outs and expanded packs fresh
+    task.spawn(function()
+        while mFrame:IsDescendantOf(game) do
+            task.wait(4)
+            if pFrame.Visible then pcall(scanAll) end
+        end
+    end)
+
+    StarAPI.GetConfig = function()
+        return { diff = diffInp.Text, conc = concInp.Text, every = everyInp.Text, skip = skipInp.Text, fails = giveInp.Text, instant = instant }
+    end
+    StarAPI.LoadConfig = function(c)
+        if not c then return end
+        if c.diff then diffInp.Text = tostring(c.diff) end
+        if c.conc then concInp.Text = tostring(c.conc) end
+        if c.every then everyInp.Text = tostring(c.every) end
+        if c.skip then skipInp.Text = (tostring(c.skip) == "0") and "Off" or tostring(c.skip) end
+        if c.fails then giveInp.Text = tostring(c.fails) end
+        if c.instant ~= nil then
+            instant = c.instant
+            instBtn.Text = (instant and "[X] " or "[ ] ") .. "Instant AttackDone"
+            instBtn.BackgroundColor3 = instant and C3(40, 200, 120) or C3(50, 50, 50)
+        end
+    end
+    StarAPI.GetState = function()
+        local names, seen = {}, {}
+        for _, d in pairs(SData) do
+            for iN, on in pairs(d.items) do if on and not seen[iN] then seen[iN] = true names[#names + 1] = iN end end
+        end
+        table.sort(names)
+        local fl, dl = {}, {}
+        for c in pairs(failed) do fl[#fl + 1] = c end
+        for c in pairs(done) do dl[#dl + 1] = c end
+        table.sort(fl) table.sort(dl)
+        return { on = running, items = names, failed = fl, done = dl }
+    end
+    StarAPI.LoadState = function(st)
+        if not st then return end
+        local want = {}
+        for _, iN in ipairs(st.items or {}) do want[iN] = true end
+        for _, c in ipairs(st.failed or {}) do markStatus(c, "failed") end
+        for _, c in ipairs(st.done or {}) do markStatus(c, "done") end
+        for pN, d in pairs(SData) do
+            for iN in pairs(d.items) do setItem(pN, iN, want[iN] == true) end
+            paintPack(pN)
+        end
+        if st.on ~= nil and st.on ~= running then setRunning(st.on) end
+    end
+end
+bStarTrial(starFrame, CardSortedPacks, CardPackCards)
+
+-- ==========================================
 -- 8. AUTO PACK OPENER (SNAKE GRID + TWO-PASS SNIPE)
 -- ==========================================
 local OpenerAPI = {}
 local function bOpener(pFrame, sData)
-    local lPnl = Instance.new("Frame", pFrame) 
-    lPnl.Size, lPnl.Position, lPnl.BackgroundColor3, lPnl.BorderSizePixel = U2(0,230,1,-20), U2(0,10,0,10), C3(30,30,30), 0
-    local pScr = Instance.new("ScrollingFrame", lPnl) 
-    pScr.Size, pScr.Position, pScr.BackgroundColor3, pScr.ScrollBarThickness, pScr.BorderSizePixel = U2(1,0,1,-25), U2(0,0,0,25), C3(25,25,25), 6, 0
-    local sLyt = Instance.new("UIListLayout", pScr) 
-    sLyt.SortOrder = Enum.SortOrder.LayoutOrder 
-    sLyt:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() pScr.CanvasSize = U2(0,0,0,sLyt.AbsoluteContentSize.Y) end)
-    
-    local saBtn = Instance.new("TextButton", lPnl) 
-    saBtn.Size, saBtn.BackgroundColor3, saBtn.TextColor3, saBtn.Text, saBtn.Font, saBtn.TextSize, saBtn.BorderSizePixel = U2(0.5,0,0,25), C3(40,40,40), C3(255,255,255), "Select All", F_GM, 12, 0
-    local daBtn = Instance.new("TextButton", lPnl) 
-    daBtn.Size, daBtn.Position, daBtn.BackgroundColor3, daBtn.TextColor3, daBtn.Text, daBtn.Font, daBtn.TextSize, daBtn.BorderSizePixel = U2(0.5,0,0,25), U2(0.5,0,0,0), C3(40,40,40), C3(255,255,255), "Deselect All", F_GM, 12, 0
+    local lPnl, rPnl = DS.split(pFrame, 230)
+    local saBtn, daBtn, pScr, sLyt = DS.tree(lPnl)
 
     local SData = {}
     local BundleBtnMap = {}
@@ -1570,27 +2441,13 @@ local function bOpener(pFrame, sData)
         SData[pN] = { isSelected = false, items = {} }
         local variants = getPackVariants(pN)
         
-        local pC = Instance.new("Frame", pScr) 
-        pC.Size, pC.BackgroundTransparency, pC.LayoutOrder, pC.AutomaticSize = U2(1,0,0,25), 1, lIdx, Enum.AutomaticSize.Y
-        Instance.new("UIListLayout", pC).SortOrder = Enum.SortOrder.LayoutOrder
-        
-        local pH = Instance.new("Frame", pC) 
-        pH.Size, pH.BackgroundColor3, pH.BorderSizePixel, pH.LayoutOrder = U2(1,0,0,25), C3(30,30,30), 0, 1
-        local eBtn = Instance.new("TextButton", pH) 
-        eBtn.Size, eBtn.BackgroundColor3, eBtn.TextColor3, eBtn.Text, eBtn.Font, eBtn.BorderSizePixel = U2(0,25,0,25), C3(35,35,35), C3(200,200,200), "+", F_GB, 0
-        local cBtn = Instance.new("TextButton", pH) 
-        cBtn.Size, cBtn.Position, cBtn.BackgroundTransparency, cBtn.TextColor3, cBtn.Text, cBtn.Font, cBtn.TextSize, cBtn.TextXAlignment = U2(1,-25,1,0), U2(0,25,0,0), 1, C3(200,200,200), " [ ] "..pN, F_GM, 12, Enum.TextXAlignment.Left
+        local pC, eBtn, cBtn, iF = DS.pack(pScr, lIdx, pN)
         SData[pN].cBtn = cBtn
-        
-        local iF = Instance.new("Frame", pC) 
-        iF.Size, iF.BackgroundTransparency, iF.Visible, iF.LayoutOrder, iF.AutomaticSize = U2(1,0,0,0), 1, false, 2, Enum.AutomaticSize.Y
-        Instance.new("UIListLayout", iF) 
         
         local iBtns = {} 
         for _, bN in ipairs(variants) do
             SData[pN].items[bN] = false
-            local ib = Instance.new("TextButton", iF) 
-            ib.Size, ib.BackgroundColor3, ib.TextColor3, ib.Text, ib.Font, ib.TextSize, ib.TextXAlignment, ib.BorderSizePixel = U2(1,0,0,20), C3(20,20,20), C3(150,150,150), "   ↳ [ ] "..bN, F_GM, 10, Enum.TextXAlignment.Left, 0
+            local ib = DS.item(iF, "   ↳ [ ] "..bN, 10)
             BundleBtnMap[bN] = ib
             ib.MouseButton1Click:Connect(function()
                 local s = not SData[pN].items[bN] 
@@ -1620,20 +2477,17 @@ local function bOpener(pFrame, sData)
     saBtn.MouseButton1Click:Connect(function() for _, pd in pairs(SData) do pd.updateUI(true) end if SaveState then SaveState() end end)
     daBtn.MouseButton1Click:Connect(function() for _, pd in pairs(SData) do pd.updateUI(false) end if SaveState then SaveState() end end)
 
-    local rPnl = Instance.new("Frame", pFrame) 
-    rPnl.Size, rPnl.Position, rPnl.BackgroundTransparency = U2(1,-250,1,-20), U2(0,250,0,10), 1
     
     local bundlesOnly = true
-    local bOnlyBtn = Instance.new("TextButton", rPnl)
-    bOnlyBtn.Size, bOnlyBtn.Position, bOnlyBtn.BackgroundColor3, bOnlyBtn.TextColor3, bOnlyBtn.Text, bOnlyBtn.Font, bOnlyBtn.TextSize, bOnlyBtn.BorderSizePixel = U2(0.48,0,0,28), U2(0,0,0,0), C3(40,200,120), C3(255,255,255), "[X] Bundles Only", F_GB, 11, 0
+    local bOnlyBtn = DS.switch(rPnl, "[X] Bundles Only", 0)
 
-    local opScanBtn = Instance.new("TextButton", rPnl)
-    opScanBtn.Size, opScanBtn.Position, opScanBtn.BackgroundColor3, opScanBtn.TextColor3, opScanBtn.Text, opScanBtn.Font, opScanBtn.TextSize, opScanBtn.BorderSizePixel = U2(0.50,0,0,28), U2(0.50,0,0,0), C3(40,120,200), C3(255,255,255), "Scan Bag & Queue", F_GB, 11, 0
+    local opScanBtn = DS.btn(rPnl, "Scan Bag & Queue", "info", 20, 36)
 
     bOnlyBtn.MouseButton1Click:Connect(function()
         bundlesOnly = not bundlesOnly
         bOnlyBtn.Text = bundlesOnly and "[X] Bundles Only" or "[ ] All Packs+Bundles"
         bOnlyBtn.BackgroundColor3 = bundlesOnly and C3(40,200,120) or C3(50,50,50)
+        if SaveConfig then SaveConfig() end
     end)
 
     opScanBtn.MouseButton1Click:Connect(function()
@@ -1665,20 +2519,29 @@ local function bOpener(pFrame, sData)
         task.delay(1.5, function() opScanBtn.Text = "Scan Bag & Queue" end)
     end)
     
-    local opPotInp = mkFullInp(rPnl, "Hatch Potion (HatchTime1 / HatchTime2)", "HatchTime2", 38, 28)
-    local opAmtInp = mkFullInp(rPnl, "Batch Size (Max 22)", "22", 92, 28)
+    local potOptions = { "HatchTime1", "HatchTime2" }
+    pcall(function()
+        local cons = getLiveData("Consumables")
+        if type(cons) == "table" then
+            local extra = {}
+            for k in pairs(cons) do if type(k) == "string" and string.find(k, "^HatchTime") and k ~= "HatchTime1" and k ~= "HatchTime2" then extra[#extra + 1] = k end end
+            table.sort(extra)
+            for _, k in ipairs(extra) do potOptions[#potOptions + 1] = k end
+        end
+    end)
+    local batchOptions = {} for n = 22, 1, -1 do batchOptions[#batchOptions + 1] = tostring(n) end
+    local opPotInp = mkDropdown(rPnl, "Hatch Potion", potOptions, "HatchTime2", 38)
+    local opAmtInp = mkDropdown(rPnl, "Batch Size (max 22)", batchOptions, "22", 92)
     local opSpdInp = mkFullInp(rPnl, "Drop/TP Speed (ms) [Lower = Faster]", "35", 146, 28)
     local opDelInp = mkFullInp(rPnl, "Loop Delay (Seconds)", "1.5", 200, 28)
 
-    for _, box in ipairs({opPotInp, opAmtInp, opSpdInp, opDelInp}) do
+    for _, box in ipairs({opSpdInp, opDelInp}) do
         box.FocusLost:Connect(function() if SaveConfig then SaveConfig() end end)
     end
     
-    local sLbl = Instance.new("TextLabel", rPnl) 
-    sLbl.Size, sLbl.Position, sLbl.BackgroundColor3, sLbl.TextColor3, sLbl.Text, sLbl.Font, sLbl.TextSize, sLbl.BorderSizePixel = U2(1,0,0,25), U2(0,0,0,258), C3(20,20,20), C3(200,200,200), "Status: Idle", F_GM, 12, 0
+    local sLbl = DS.status(rPnl, "Status: Idle", 258)
 
-    local opBtn = Instance.new("TextButton", rPnl)
-    opBtn.Size, opBtn.Position, opBtn.BackgroundColor3, opBtn.TextColor3, opBtn.Text, opBtn.Font, opBtn.TextSize, opBtn.BorderSizePixel = U2(1,0,0,40), U2(0,0,0,290), C3(40,200,120), C3(255,255,255), "Start Auto-Opener", F_GB, 14, 0
+    local opBtn = DS.btn(rPnl, "Start Auto-Opener", "ok", 290, 40)
 
     local isOpener = false
     local opCardEvt = getRemote("Card")
@@ -1821,7 +2684,6 @@ local function bOpener(pFrame, sData)
                 
                 local baseCFrame = hrp.CFrame
                 local gridCenterCF = baseCFrame * CFrame.new(0, 0, -40)
-                -- 9-stud spacing prevents larger Diamond/Void mutation hitboxes from overlapping
                 local columns, spacing = 8, 9
                 local totalRows = math.ceil(amt / columns)
                 local dropLocations = {}
@@ -1832,7 +2694,6 @@ local function bOpener(pFrame, sData)
                     if getOwnedPackCount(cT.Item) <= 0 then break end
                     local row = math.floor((i - 1) / columns)
                     local colInRow = (i - 1) % columns
-                    -- Boustrophedon (snake) pathing: even rows L->R, odd rows R->L
                     local col = (row % 2 == 0) and colInRow or (columns - 1 - colInRow)
                     local offsetX = (col - (columns - 1) / 2) * spacing
                     local offsetZ = (row - (totalRows - 1) / 2) * spacing
@@ -1900,7 +2761,6 @@ local function bOpener(pFrame, sData)
                 
                 sLbl.Text = "Opening " .. #validPrompts .. " Packs..."
                 if fireproximityprompt then
-                    -- Pass 1: Zero HoldDuration/LOS and snipe all prompts in spatial order
                     for _, entry in ipairs(validPrompts) do
                         if not isOpener then break end
                         if entry.prompt and entry.prompt.Parent then
@@ -1914,7 +2774,6 @@ local function bOpener(pFrame, sData)
                             pcall(fireproximityprompt, entry.prompt)
                         end
                     end
-                    -- Pass 2: Straggler sweep for any prompts that missed server tick validation
                     task.wait(0.2)
                     local stragglers = getGridPrompts()
                     if #stragglers > 0 and isOpener then
@@ -1955,13 +2814,17 @@ local function bOpener(pFrame, sData)
     end
     opBtn.MouseButton1Click:Connect(function() setOpenerRunning(not isOpener) if SaveState then SaveState() end end)
 
-    OpenerAPI.GetConfig = function() return {potion = opPotInp.Text, amt = opAmtInp.Text, spd = opSpdInp.Text, delay = opDelInp.Text} end
+    OpenerAPI.GetConfig = function() return {potion = opPotInp.Text, amt = opAmtInp.Text, spd = opSpdInp.Text, delay = opDelInp.Text, bundlesOnly = bundlesOnly} end
     OpenerAPI.LoadConfig = function(cfg)
         if type(cfg) ~= "table" then return end
         if cfg.potion then opPotInp.Text = tostring(cfg.potion) end
         if cfg.amt then opAmtInp.Text = tostring(cfg.amt) end
         if cfg.spd then opSpdInp.Text = tostring(cfg.spd) end
         if cfg.delay then opDelInp.Text = tostring(cfg.delay) end
+        if cfg.bundlesOnly ~= nil then
+            bundlesOnly = cfg.bundlesOnly == true
+            bOnlyBtn.Text = bundlesOnly and "[X] Bundles Only" or "[ ] All Packs+Bundles"
+        end
     end
     OpenerAPI.GetState = function()
         local checked = {}
@@ -2004,26 +2867,13 @@ bOpener(oFrame, CardSortedPacks)
 local FigurineAPI = {}
 
 local function buildFigurineGrader(parent)
-    local panel = Instance.new("Frame", parent)
-    panel.Size, panel.Position, panel.BackgroundColor3, panel.BorderSizePixel = U2(1, -20, 1, -20), U2(0, 10, 0, 10), C3(30, 30, 30), 0
+    local listCard, controls = DS.split(parent, 300)
+    local list = DS.new("ScrollingFrame", listCard, { Size = U2(1, -12, 1, -12), Position = U2(0, 6, 0, 6), ScrollBarThickness = 3, ScrollBarImageColor3 = T.stroke, AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = U2(0, 0, 0, 0) })
+    local layout = DS.vlist(list, 2)
+    DS.pad(list, 0, 0, 6, 0)
 
-    local list = Instance.new("ScrollingFrame", panel)
-    list.Size, list.Position, list.BackgroundColor3, list.ScrollBarThickness, list.BorderSizePixel = U2(0, 300, 1, -20), U2(0, 10, 0, 10), C3(22, 22, 22), 6, 0
-    list.CanvasSize = U2(0, 0, 0, 0)
-    local layout = Instance.new("UIListLayout", list)
-    layout.SortOrder = Enum.SortOrder.LayoutOrder
-    layout.Padding = UDim.new(0, 2)
-    layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-        list.CanvasSize = U2(0, 0, 0, layout.AbsoluteContentSize.Y + 4)
-    end)
-
-    local controls = Instance.new("Frame", panel)
-    controls.Size, controls.Position, controls.BackgroundTransparency = U2(1, -320, 1, -20), U2(0, 310, 0, 10), 1
-    local status = Instance.new("TextLabel", controls)
-    status.Size, status.BackgroundColor3, status.TextColor3, status.Text, status.Font, status.TextSize = U2(1, 0, 0, 28), C3(20, 20, 20), C3(200, 200, 200), "Status: Idle", F_GM, 12
-
-    local modeBtn = Instance.new("TextButton", controls)
-    modeBtn.Size, modeBtn.Position, modeBtn.BackgroundColor3, modeBtn.TextColor3, modeBtn.Text, modeBtn.Font, modeBtn.TextSize = U2(1, 0, 0, 34), U2(0, 0, 0, 38), C3(40, 40, 120), C3(255, 255, 255), "Mode: Grade", F_GB, 13
+    local status = DS.status(controls, "Status: Idle", 0)
+    local modeBtn = DS.btn(controls, "Mode: Grade", "accent", 38, 36)
     local figurineGrades, figurineTraits = {}, {}
     local okGalleryConfig, galleryConfig = pcall(function() return require(RS.Modules.Config.Core.GalleryConfig) end)
     if okGalleryConfig and type(galleryConfig) == "table" then
@@ -2037,12 +2887,11 @@ local function buildFigurineGrader(parent)
     local traitInp = mkDropdown(controls, "Target Figurine Trait", figurineTraits, figurineTraits[1], 140, 260)
     traitInp.Visible = false
     local delayInp = mkFullInp(controls, "Delay (ms)", "300", 198, 30)
-    local selectBtn = Instance.new("TextButton", controls)
-    selectBtn.Size, selectBtn.Position, selectBtn.BackgroundColor3, selectBtn.TextColor3, selectBtn.Text, selectBtn.Font, selectBtn.TextSize = U2(0.5, -4, 0, 32), U2(0, 0, 0, 258), C3(45, 45, 45), C3(255, 255, 255), "Select All", F_GM, 12
-    local clearBtn = selectBtn:Clone()
-    clearBtn.Position, clearBtn.Text, clearBtn.Parent = U2(0.5, 4, 0, 258), "Clear", controls
-    local runBtn = Instance.new("TextButton", controls)
-    runBtn.Size, runBtn.Position, runBtn.BackgroundColor3, runBtn.TextColor3, runBtn.Text, runBtn.Font, runBtn.TextSize = U2(1, 0, 0, 40), U2(0, 0, 0, 300), C3(40, 200, 120), C3(255, 255, 255), "Start Figurine Roller", F_GB, 14
+    local selRow = DS.new("Frame", controls, { Size = U2(1, 0, 0, 34), LayoutOrder = 258 })
+    local selectBtn = DS.new("TextButton", selRow, { Size = U2(0.5, -4, 1, 0), BackgroundColor3 = T.surface3, TextColor3 = T.text2, Text = "Select All", Font = F_GM, TextSize = 12 })
+    local clearBtn = DS.new("TextButton", selRow, { Size = U2(0.5, -4, 1, 0), Position = U2(0.5, 4, 0, 0), BackgroundColor3 = T.surface3, TextColor3 = T.text2, Text = "Clear", Font = F_GM, TextSize = 12 })
+    DS.corner(selectBtn, 8) DS.corner(clearBtn, 8)
+    local runBtn = DS.btn(controls, "Start Figurine Roller", "ok", 300, 40)
 
     local selected, buttons, names = {}, {}, {}
     local mode, running, waiting, result, runId = "Grade", false, false, nil, 0
@@ -2083,8 +2932,8 @@ local function buildFigurineGrader(parent)
     end
     table.sort(names)
     for index, name in ipairs(names) do
-        local b = Instance.new("TextButton", list)
-        b.Size, b.BackgroundColor3, b.Font, b.TextSize, b.TextXAlignment, b.BorderSizePixel, b.LayoutOrder = U2(1, -8, 0, 24), C3(28, 28, 28), F_GM, 11, Enum.TextXAlignment.Left, 0, index
+        local b = DS.item(list, "", 11)
+        b.LayoutOrder = index
         buttons[name] = b
         b.MouseButton1Click:Connect(function()
             selected[name] = not selected[name]
@@ -2260,19 +3109,16 @@ buildFigurineGrader(figFrame)
 -- ==========================================
 -- 10. SETTINGS TAB & AUTO-SYNC ENGINE
 -- ==========================================
-local sPnl = Instance.new("Frame", sFrame)
-sPnl.Size, sPnl.Position, sPnl.BackgroundColor3, sPnl.BorderSizePixel = U2(1,-20,1,-20), U2(0,10,0,10), C3(30,30,30), 0
-
-local accInfoLbl = Instance.new("TextLabel", sPnl)
-accInfoLbl.Size, accInfoLbl.Position, accInfoLbl.BackgroundTransparency, accInfoLbl.TextColor3, accInfoLbl.Font, accInfoLbl.TextSize = U2(1,-20,0,45), U2(0,10,0,15), 1, C3(255,215,0), F_GB, 13
-accInfoLbl.Text = "Account: " .. LP.Name .. "  |  UserId: " .. UID .. "\nConfig: " .. ConfigFileName .. "  |  State: " .. StateFileName
-
-local scInp = mkInp(sPnl, "UI Scale (e.g. 1.0)", "1.0", 75, -120, 240)
-scInp.FocusLost:Connect(function() uiScale.Scale = tonumber(scInp.Text) or 1 if SaveConfig then SaveConfig() end end)
+local sPage = DS.page(sFrame)
+local sPnl = DS.card(sPage, "Account", nil, 1)
+local accInfoLbl = DS.new("TextLabel", sPnl, { Size = U2(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, Font = F_GM, TextSize = 12, TextColor3 = T.text2, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true, LayoutOrder = 1 })
+accInfoLbl.Text = "Account: " .. LP.Name .. "  |  UserId: " .. UID .. "\nConfig: " .. ConfigFileName .. "\nState: " .. StateFileName
+local prefPnl = DS.card(sPage, "Preferences", nil, 2)
+local scInp = mkDropdown(prefPnl, "UI Scale", { "0.6", "0.7", "0.8", "0.9", "1.0", "1.1", "1.2", "1.3", "1.5", "1.7", "2.0" }, "1.0", 75)
+scInp:GetPropertyChangedSignal("Text"):Connect(function() uiScale.Scale = tonumber(scInp.Text) or 1 end)
 
 local isAFK = true
-local afkBtn = Instance.new("TextButton", sPnl)
-afkBtn.Size, afkBtn.Position, afkBtn.BackgroundColor3, afkBtn.TextColor3, afkBtn.Text, afkBtn.Font, afkBtn.TextSize, afkBtn.BorderSizePixel = U2(0,240,0,40), U2(0.5,-120,0,145), C3(40,200,120), C3(255,255,255), "[X] Built-In Anti-AFK", F_GB, 13, 0
+local afkBtn = DS.switch(prefPnl, "[X] Built-In Anti-AFK", 80)
 
 local afkRun = 0
 local function setAfkState(state)
@@ -2305,14 +3151,12 @@ LP.Idled:Connect(function()
     if isAFK then pcall(function() VU:CaptureController() VU:ClickButton2(Vector2.new()) end) end
 end)
 
-local statusFileLbl = Instance.new("TextLabel", sPnl)
-statusFileLbl.Size, statusFileLbl.Position, statusFileLbl.BackgroundTransparency, statusFileLbl.TextColor3, statusFileLbl.Font, statusFileLbl.TextSize = U2(1,-20,0,30), U2(0,10,0,205), 1, C3(150,220,150), F_GM, 12
-statusFileLbl.Text = "Auto-Sync Active (No manual save/load required)"
-
-local rstBtn = Instance.new("TextButton", sPnl)
-rstBtn.Size, rstBtn.Position, rstBtn.BackgroundColor3, rstBtn.TextColor3, rstBtn.Text, rstBtn.Font, rstBtn.TextSize, rstBtn.BorderSizePixel = U2(0,240,0,35), U2(0.5,-120,0,250), C3(180,50,50), C3(255,255,255), "Reset Account State & Queue", F_GB, 12, 0
+local dataPnl = DS.card(sPage, "Data", "Settings and queues are saved automatically per account.", 3)
+local statusFileLbl = DS.label(dataPnl, "Auto-Sync Active (No manual save/load required)", 12, T.ok2, F_GM, 1)
+local rstBtn = DS.btn(dataPnl, "Reset Account State & Queue", "danger", 2, 36)
 
 local Persist = {}
+function Persist.stamp() statusFileLbl.Text = "Auto-saved " .. os.date("%H:%M:%S") end
 
 function Persist.safe(fn, ...)
     if type(fn) ~= "function" then return nil end
@@ -2368,6 +3212,8 @@ function Persist.buildConfig()
         userId = LP.UserId, accountName = LP.Name, uiScale = scInp.Text, afk = isAFK, fishDelay = fDelInp.Text,
         grader = Persist.safe(GraderAPI.GetConfig),
         tower = Persist.safe(TowerAPI.GetConfig),
+        auto = Persist.safe(AutoAPI.GetConfig),
+        star = Persist.safe(StarAPI.GetConfig),
         opener = Persist.safe(OpenerAPI.GetConfig),
         fig = Persist.safe(FigurineAPI.GetConfig),
     }
@@ -2376,22 +3222,25 @@ end
 function Persist.buildState()
     return {
         userId = LP.UserId, accountName = LP.Name,
+        marketBuyAll = isMarketBuyAll,
         fish = isFish, gems = isGems, hud = isHudEnabled,
         raid = Persist.getRaid(),
         grader = Persist.safe(GraderAPI.GetState),
         tower = Persist.safe(TowerAPI.GetState),
+        auto = Persist.safe(AutoAPI.GetState),
+        star = Persist.safe(StarAPI.GetState),
         opener = Persist.safe(OpenerAPI.GetState),
         fig = Persist.safe(FigurineAPI.GetState),
     }
 end
 
 SaveConfig = function()
-    if not writefile then return end
+    if not writefile or Persist.loadingCfg then return end
     pcall(function() writefile(ConfigFileName, HS:JSONEncode(Persist.buildConfig())) end)
 end
 
 SaveState = function()
-    if not writefile then return end
+    if not writefile or not Persist.restored then return end
     pcall(function() writefile(StateFileName, HS:JSONEncode(Persist.buildState())) end)
 end
 
@@ -2404,12 +3253,12 @@ function Persist.startAutosave()
             local okC, encC = pcall(function() return HS:JSONEncode(Persist.buildConfig()) end)
             if okC and encC ~= lastCfg then
                 lastCfg = encC
-                pcall(writefile, ConfigFileName, encC)
+                pcall(writefile, ConfigFileName, encC) pcall(Persist.stamp)
             end
             local okS, encS = pcall(function() return HS:JSONEncode(Persist.buildState()) end)
             if okS and encS ~= lastSt then
                 lastSt = encS
-                pcall(writefile, StateFileName, encS)
+                pcall(writefile, StateFileName, encS) pcall(Persist.stamp)
             end
             task.wait(2)
         end
@@ -2421,6 +3270,7 @@ rstBtn.MouseButton1Click:Connect(function()
     Persist.safe(TowerAPI.LoadState, {isT = false, items = {}})
     Persist.safe(OpenerAPI.LoadState, {isO = false, items = {}})
     Persist.safe(FigurineAPI.LoadState, {isF = false, items = {}})
+    Persist.safe(setMarketBuyState, false)
     Persist.safe(setRaidState, false)
     Persist.safe(Persist.loadRaid, {running = false, packs = {}})
     if SaveState then SaveState() end
@@ -2439,6 +3289,7 @@ local function InitAccountFiles()
 
     setAfkState(true)
 
+    Persist.loadingCfg = true
     if cfg then
         try("settings", function()
             if cfg.uiScale then scInp.Text = tostring(cfg.uiScale) uiScale.Scale = tonumber(scInp.Text) or 1 end
@@ -2447,14 +3298,20 @@ local function InitAccountFiles()
         end)
         try("grader config", function() if cfg.grader then GraderAPI.LoadConfig(cfg.grader) end end)
         try("tower config", function() if cfg.tower then TowerAPI.LoadConfig(cfg.tower) end end)
+        try("auto config", function() if cfg.auto then AutoAPI.LoadConfig(cfg.auto) end end)
+        try("star config", function() if cfg.star then StarAPI.LoadConfig(cfg.star) end end)
         try("opener config", function() if cfg.opener then OpenerAPI.LoadConfig(cfg.opener) end end)
         try("figurine config", function() if cfg.fig then FigurineAPI.LoadConfig(cfg.fig) end end)
     end
 
+    Persist.loadingCfg = false
+
     if st then
+        try("market", function() if st.marketBuyAll ~= nil and st.marketBuyAll ~= isMarketBuyAll then setMarketBuyState(st.marketBuyAll) end end)
         try("fish", function() if st.fish ~= nil and st.fish ~= isFish then setFishState(st.fish) end end)
         try("gems", function() if st.gems ~= nil and st.gems ~= isGems then setGemsState(st.gems) end end)
         try("hud", function() if st.hud ~= nil and st.hud ~= isHudEnabled then setHudState(st.hud) end end)
+        try("auto", function() if st.auto then AutoAPI.LoadState(st.auto) end end)
     end
 
     task.spawn(function()
@@ -2464,14 +3321,16 @@ local function InitAccountFiles()
             try("tower", function() if st.tower then TowerAPI.LoadState(st.tower) end end)
             try("opener", function() if st.opener then OpenerAPI.LoadState(st.opener) end end)
             try("figurines", function() if st.fig then FigurineAPI.LoadState(st.fig) end end)
+            try("star trial", function() if st.star then StarAPI.LoadState(st.star) end end)
             try("raid", function() if st.raid then Persist.loadRaid(st.raid) end end)
             task.wait(6)
         else
             task.wait(1)
         end
+        Persist.restored = true
         Persist.startAutosave()
     end)
 end
 
 InitAccountFiles()
-print("ACC Master Suite (10-Tab Edition) Loaded Successfully!")
+print("ACC Master Suite (11-Tab Edition + Market BuyAll) Loaded Successfully!")
