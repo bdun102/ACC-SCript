@@ -1,3 +1,12 @@
+-- ACC BOOT GUARD: wait for the game to load, then until 15s have passed since it started.
+-- Injecting later than that adds no extra wait. Change ACC_BOOT_DELAY to adjust.
+do
+    local DELAY = (getgenv and getgenv().ACC_BOOT_DELAY) or 15
+    if not game:IsLoaded() then game.Loaded:Wait() end
+    local left = DELAY - time()
+    if left > 0 then task.wait(left) end
+end
+
 -- =========================================================================
 -- ACC MASTER SUITE: 11-TAB EDITION (UPGRADED OPENER + MARKET BUYALL) - REDESIGNED UI
 -- =========================================================================
@@ -645,16 +654,11 @@ local targetParent = safeGuiParent() or LP:FindFirstChild("PlayerGui")
 
 local sg = DS.new("ScreenGui", targetParent, { Name = "ACC_Suite", ZIndexBehavior = Enum.ZIndexBehavior.Sibling, ResetOnSpawn = false })
 
-local sqBtn = DS.new("TextButton", sg, { Size = U2(0, 92, 0, 34), Position = U2(0.5, -46, 0, 16), BackgroundColor3 = T.surface, Text = "ACC  ▸", TextColor3 = T.text, Font = F_GB, TextSize = 13, Visible = false })
+local sqBtn = DS.new("TextButton", sg, { AnchorPoint = Vector2.new(0.5, 0), Size = U2(0, 92, 0, 34), Position = U2(0.5, 0, 0, 16), BackgroundColor3 = T.surface, Text = "ACC  ▸", TextColor3 = T.text, Font = F_GB, TextSize = 13, Visible = false })
 DS.corner(sqBtn, 17) DS.stroke(sqBtn, T.accent, 1.5)
 
 local mFrame = DS.new("Frame", sg, { AnchorPoint = Vector2.new(0.5, 0.5), Size = U2(0.94, 0, 0.88, 0), Position = U2(0.5, 0, 0.5, 0), BackgroundColor3 = T.bg, Active = true, ClipsDescendants = true })
 DS.corner(mFrame, 14) DS.stroke(mFrame)
-do
-    local limit = Instance.new("UISizeConstraint")
-    limit.MinSize, limit.MaxSize = Vector2.new(340, 420), Vector2.new(960, 700)
-    limit.Parent = mFrame
-end
 
 task.spawn(function()
     while task.wait(2) do
@@ -671,6 +675,34 @@ task.spawn(function()
 end)
 
 uiScale = Instance.new("UIScale") uiScale.Scale = 1 uiScale.Parent = mFrame
+local sqScale = Instance.new("UIScale") sqScale.Parent = sqBtn
+
+-- UI scale: "Auto" picks a size from the screen (and whether it is a touch screen); a number is used as is.
+-- The window is resized to fit the screen at that scale, so text stays visible at any setting.
+local scaleSetting = "Auto"
+local function viewport()
+    local cam = workspace.CurrentCamera
+    return cam and cam.ViewportSize or Vector2.new(1280, 720)
+end
+local function computeScale(txt)
+    local n = tonumber(txt)
+    if n then return n end
+    local vp = viewport()
+    local s = UIS.TouchEnabled and vp.Y / 760 or vp.Y / 1080
+    return math.clamp(math.floor(s * 20 + 0.5) / 20, 1, 2.5)
+end
+local function fitWindow()
+    local vp, sc = viewport(), math.max(uiScale.Scale, 0.1)
+    mFrame.Size = U2(0, math.clamp(vp.X * 0.94 / sc, 340, 1000), 0, math.clamp(vp.Y * 0.9 / sc, 420, 760))
+end
+local function applyScale(txt)
+    scaleSetting = txt or scaleSetting
+    uiScale.Scale = computeScale(scaleSetting)
+    sqScale.Scale = uiScale.Scale
+    fitWindow()
+end
+applyScale("Auto")
+pcall(function() workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(function() applyScale() end) end)
 
 -- title bar
 local tBar = DS.new("Frame", mFrame, { Size = U2(1, 0, 0, 48), Active = true })
@@ -1012,24 +1044,19 @@ local getStockFn = getRemote("GetStock")
 local updateStockTimeEvt = getRemote("UpdateStockTime")
 
 local lastBuyAt = -1e9
+local stockInterval = 300 -- seconds between restocks, learned from the shop timer
 local function executeMarketBuyAll(reason, force)
     if not stockEvt then
         mktStat.Text = "ERR: Stock Remote Missing"
         return
     end
-    -- the timer fires several events around a restock; only react once per restock
-    if not force and os.clock() - lastBuyAt < 5 then return end
+    -- one BuyAll per restock: the timer and the stock event both fire around a restock, so ignore repeats for 20s
+    if not force and os.clock() - lastBuyAt < 20 then return end
     lastBuyAt = os.clock()
     task.wait(0.25) -- Brief buffer so server finishes populating restocked items
-    -- fired twice: an owned dragon ball can block the first pass, the second pass picks up the rest
-    local ok = false
-    for pass = 1, 2 do
-        ok = pcall(function() stockEvt:FireServer("BuyAll") end) or ok
-        if pass == 1 then task.wait(0.4) end
-    end
-    if ok then
+    if pcall(function() stockEvt:FireServer("BuyAll") end) then
         marketBuyCount = marketBuyCount + 1
-        mktStat.Text = string.format("Bought All x2 (%s) | Total Restocks: %d", reason or "Refresh", marketBuyCount)
+        mktStat.Text = string.format("Bought All (%s) | Total Restocks: %d | next in about %ds", reason or "Refresh", marketBuyCount, stockInterval)
     end
 end
 
@@ -1038,7 +1065,8 @@ if updateStockTimeEvt then
         if not isMarketBuyAll then return end
         -- When stock timer resets (high value or <= 1s rollover), trigger BuyAll
         local t = tonumber(timeLeft)
-        if t and (t <= 1 or t >= 295) then
+        if t and t > stockInterval then stockInterval = math.floor(t + 0.5) end
+        if t and (t <= 1 or t >= stockInterval - 5) then
             executeMarketBuyAll("Timer Reset")
         end
     end)
@@ -1052,6 +1080,14 @@ if stockEvt then
         end
     end)
 end
+
+-- safety net: if the shop events never arrive, buy once per refresh interval anyway
+task.spawn(function()
+    while mFrame:IsDescendantOf(game) do
+        task.wait(5)
+        if isMarketBuyAll and os.clock() - lastBuyAt > stockInterval + 15 then executeMarketBuyAll("Interval") end
+    end
+end)
 
 local function setMarketBuyState(state)
     isMarketBuyAll = state and stockEvt ~= nil
@@ -1136,8 +1172,15 @@ local function refreshRaidPackRows()
         local button = raidPackButtons[packName]
         if button then
             local count = raidProgress(packName)
-            button.Text = (raidSelectedPacks[packName] and "[X] " or "[ ] ") .. packName .. "  " .. tostring(math.min(count, 9)) .. "/9"
-            button.TextColor3 = count >= 9 and C3(150, 150, 150) or (raidSelectedPacks[packName] and C3(40, 220, 130) or C3(210, 210, 210))
+            if count >= 9 then
+                -- finished packs can never stay queued: clear the selection so the green check goes away
+                raidSelectedPacks[packName] = nil
+                button.Text = "[ ] " .. packName .. "\t\t\226\156\147 9/9"
+                button.TextColor3 = C3(150, 150, 150)
+            else
+                button.Text = (raidSelectedPacks[packName] and "[X] " or "[ ] ") .. packName .. "  " .. tostring(count) .. "/9"
+                button.TextColor3 = raidSelectedPacks[packName] and C3(40, 220, 130) or C3(210, 210, 210)
+            end
         end
     end
 end
@@ -1980,6 +2023,7 @@ local function bStarTrial(pFrame, sData, pcData)
     local saBtn, daBtn, pScr = DS.tree(lPnl)
     local SData = {}
     local failed, done = {}, {}
+    local blockedNote = function(_) end
 
     local function infoOf(name)
         local r = getLiveRecord("Cards", name)
@@ -1990,6 +2034,32 @@ local function bStarTrial(pFrame, sData, pcData)
             mut = r.Mutation and tostring(r.Mutation) or "Regular",
             trait = r.Trait and tostring(r.Trait) or "",
         }
+    end
+    -- what the game needs for this card's NEXT star: completions per difficulty + currency (from StarTrialConfig)
+    local StarCfg
+    pcall(function() StarCfg = require(RS.Modules.Config.Core.StarTrialConfig) end)
+    local function diffRank(d) for k, v in ipairs(TRIAL_DIFFICULTIES) do if v == d then return k end end return 0 end
+    local function nextReq(card)
+        local i = infoOf(card)
+        if not i or i.star >= MAX_STAR then return nil end
+        local ev = StarCfg and StarCfg.StarEvolutions and StarCfg.StarEvolutions[tostring(i.star + 1)]
+        if type(ev) ~= "table" then return nil end
+        local sd = getLiveData("StarData", card)
+        local r = { ready = true, diff = nil, short = nil }
+        local top
+        for d, n in pairs(ev.Completions or {}) do
+            if diffRank(d) > diffRank(top) then top = d end
+            local have, rd = 0, diffRank(d)
+            if type(sd) == "table" and rd > 0 then
+                for k, v in pairs(sd) do if diffRank(k) >= rd then have = math.max(have, tonumber(v) or 0) end end
+            end
+            if have < n and (not r.diff or diffRank(d) < diffRank(r.diff)) then r.diff = d r.ready = false end
+        end
+        for k, n in pairs(ev.Currency or {}) do
+            if (tonumber(getLiveData("StarCurrency", k)) or 0) < n then r.short = k r.ready = false end
+        end
+        r.top = top
+        return r
     end
     local function rowText(name, on)
         local i = infoOf(name)
@@ -2008,14 +2078,11 @@ local function bStarTrial(pFrame, sData, pcData)
     local function setItem(pN, iN, on)
         local d = SData[pN]
         if on and (failed[iN] or done[iN]) then on = false end -- failed / completed cards cannot be selected
+        if on then local i0 = infoOf(iN) if i0 and i0.star >= MAX_STAR then on = false end end -- neither can maxed cards
         d.items[iN] = on and true or false
         local b = d.btns[iN]
         b.Text = rowText(iN, d.items[iN])
         b.TextColor3 = failed[iN] and C3(220, 70, 70) or done[iN] and C3(96, 165, 250) or (d.items[iN] and C3(40, 200, 120) or C3(150, 150, 150))
-    end
-    local function setPack(pN, on)
-        for iN in pairs(SData[pN].items) do setItem(pN, iN, on) end
-        paintPack(pN)
     end
     local function refreshPack(pN)
         local d = SData[pN]
@@ -2038,6 +2105,27 @@ local function bStarTrial(pFrame, sData, pcData)
         end
     end
 
+    -- select-all skips failed / done / maxed cards. A direct pick of a pack whose remaining cards are all failed / done
+    -- clears those marks and selects them again.
+    local function setPack(pN, on, direct)
+        local d, picked = SData[pN], 0
+        for iN in pairs(d.items) do
+            setItem(pN, iN, on)
+            if on and d.items[iN] then picked = picked + 1 end
+        end
+        if on and direct and picked == 0 then
+            for iN in pairs(d.items) do
+                if failed[iN] or done[iN] then
+                    markStatus(iN, nil)
+                    setItem(pN, iN, true)
+                    picked = picked + 1
+                end
+            end
+            if picked > 0 then blockedNote("Cleared the failed/done marks in " .. pN .. " and selected those cards again") end
+        end
+        paintPack(pN)
+    end
+
     for lIdx, pD in ipairs(sData) do
         local pN = pD.Name
         local pC, eBtn, cBtn, iF = DS.pack(pScr, lIdx, pN)
@@ -2048,7 +2136,10 @@ local function bStarTrial(pFrame, sData, pcData)
             ib.TextColor3 = C3(150, 150, 150)
             SData[pN].btns[iN] = ib
             ib.MouseButton1Click:Connect(function()
-                setItem(pN, iN, not SData[pN].items[iN]) paintPack(pN)
+                local want = not SData[pN].items[iN]
+                if want and (failed[iN] or done[iN]) then markStatus(iN, nil) end -- picking a card yourself overrides its mark
+                setItem(pN, iN, want) paintPack(pN)
+                if want and not SData[pN].items[iN] then blockedNote(iN .. " is already at max stars") end
                 if SaveState then SaveState() end
             end)
         end
@@ -2056,7 +2147,7 @@ local function bStarTrial(pFrame, sData, pcData)
             iF.Visible = not iF.Visible eBtn.Text = iF.Visible and "-" or "+"
             if iF.Visible then refreshPack(pN) end
         end)
-        cBtn.MouseButton1Click:Connect(function() setPack(pN, not SData[pN].isSelected) if SaveState then SaveState() end end)
+        cBtn.MouseButton1Click:Connect(function() setPack(pN, not SData[pN].isSelected, true) if SaveState then SaveState() end end)
     end
     saBtn.MouseButton1Click:Connect(function() for pN in pairs(SData) do setPack(pN, true) end if SaveState then SaveState() end end)
     daBtn.MouseButton1Click:Connect(function() for pN in pairs(SData) do setPack(pN, false) end if SaveState then SaveState() end end)
@@ -2090,19 +2181,28 @@ local function bStarTrial(pFrame, sData, pcData)
     local scanBtn = DS.btn(rPnl, "Scan Packs", "info", 2, 36)
     local selBtn = DS.btn(rPnl, "Scan & Select Unmaxed", "accent", 3, 36)
     local scanLbl = DS.status(rPnl, "Scan: not run yet (maxed cards and packs are grayed out)", 4)
-    local diffInp = DS.dropdown(rPnl, "Difficulty", TRIAL_DIFFICULTIES, "Hard", 5)
+    blockedNote = function(t) scanLbl.Text = t end
+    local diffOpts = { "Auto (what the next star needs)" }
+    for _, d in ipairs(TRIAL_DIFFICULTIES) do diffOpts[#diffOpts + 1] = d end
+    local diffInp = DS.dropdown(rPnl, "Difficulty", diffOpts, diffOpts[1], 5)
     local concInp = DS.dropdown(rPnl, "Concurrent trials (experimental)", { "1", "2", "3", "4", "5" }, "1", 6)
-    local everyInp = DS.fullInp(rPnl, "Retry Start every (seconds)", "3", 7, 30)
+    local everyInp = DS.fullInp(rPnl, "Wait for the fight to begin before re-sending Start (seconds)", "20", 7, 30)
     local skipInp = DS.dropdown(rPnl, "Skip cards at ★ or higher", { "Off", "1", "2", "3", "4", "5" }, "5", 8)
     local giveInp = DS.dropdown(rPnl, "Mark card failed after (trials without a star)", { "1", "2", "3", "5", "10", "Unlimited" }, "1", 9)
-    local instBtn = DS.switch(rPnl, "[X] Instant AttackDone", 10)
-    local stBtn = DS.btn(rPnl, "Start Star Trials", "ok", 11, 40)
-    local upBtn = DS.btn(rPnl, "Send Star Upgrade (selected cards)", "info", 12, 36)
-    local clearBtn = DS.btn(rPnl, "Clear Done / Failed Marks", nil, 13, 34)
+    local instBtn = DS.switch(rPnl, "[ ] Instant AttackDone (off = the game's own timing)", 10)
+    local tpBtn = DS.switch(rPnl, "[X] Block the game's teleport (stay where you are)", 11)
+    local uiBtn = DS.switch(rPnl, "[X] Hide the trial screen", 12)
+    local chalInp = DS.dropdown(rPnl, "Start each fight by", { "Remote call (no movement)", "Hop to enemy, then back" }, "Remote call (no movement)", 13)
+    local stBtn = DS.btn(rPnl, "Start Star Trials", "ok", 14, 40)
+    local upBtn = DS.btn(rPnl, "Send Star Upgrade (selected cards)", "info", 15, 36)
+    local clearBtn = DS.btn(rPnl, "Clear Done / Failed Marks", nil, 16, 34)
     everyInp.FocusLost:Connect(function() if SaveConfig then SaveConfig() end end)
 
     local function scanText(np, mp, nc)
-        return string.format("Scan: %d packs still need stars, %d packs fully ★%d (grayed out), %d owned cards below ★%d", np, mp, MAX_STAR, nc, MAX_STAR)
+        local nf, nd = 0, 0
+        for _ in pairs(failed) do nf = nf + 1 end
+        for _ in pairs(done) do nd = nd + 1 end
+        return string.format("Scan: %d packs still need stars, %d packs fully ★%d (grayed out), %d owned cards below ★%d | marked: %d failed, %d done", np, mp, MAX_STAR, nc, MAX_STAR, nf, nd)
     end
     scanBtn.MouseButton1Click:Connect(function()
         local np, mp, nc = scanAll()
@@ -2126,13 +2226,30 @@ local function bStarTrial(pFrame, sData, pcData)
     end)
 
     local trialRem = getRemote("StarTrial")
-    local running, runId, instant = false, 0, true
+    local running, runId, instant = false, 0, false
+    local noTp, hideUI, latency, gotFirst = true, true, nil, {}
+    local trialOn, battle, curCard, chalAt, chalN = false, false, nil, 0, 0
+    -- event log, written to ACC_StarTrial_Log.txt while running so a bad run can be inspected
+    local slog, t0log = {}, os.clock()
+    local function L(msg)
+        slog[#slog + 1] = string.format("[%8.2f] %s", os.clock() - t0log, msg)
+        if #slog > 400 then table.remove(slog, 1) end
+    end
+    local function short(v)
+        if type(v) == "table" then local ok, j = pcall(function() return HS:JSONEncode(v) end) v = ok and j or "{...}" end
+        v = tostring(v)
+        return #v > 90 and (string.sub(v, 1, 90) .. "...") or v
+    end
+    local function saveLog()
+        if writefile then pcall(writefile, "ACC_StarTrial_Log.txt", table.concat(slog, "\n")) end
+    end
     local activeAt, startedAt, sent, fights, stages, fightT, times = {}, {}, 0, 0, 0, nil, {}
     local wasActive, tries, upgrades, lastOther, verifying, evoAt = {}, {}, 0, nil, {}, {}
-    local KNOWN = { StartFight = true, Attack = true, EnemyDefeated = true, StageCleared = true, EvolutionSuccess = true }
+    local KNOWN = { StartTrial = true, StartFight = true, Attack = true, EnemyDefeated = true, StageCleared = true, Results = true, EvolutionSuccess = true }
     local ACTIVE_FOR = 8
 
     local function sendUpgrade(card)
+        L("OUT Star " .. tostring(card))
         if trialRem then pcall(function() trialRem:FireServer("Star", card) end) end
     end
     local function maxTries() return tonumber(giveInp.Text) or 0 end
@@ -2151,32 +2268,55 @@ local function bStarTrial(pFrame, sData, pcData)
         end
         return false
     end
-    -- upgrade attempts for a batch (already-won trials); only successes are marked, nothing is marked failed
-    local function cashIn(list)
-        local before = {}
-        for _, c in ipairs(list) do
-            local i = infoOf(c)
-            before[c] = i and i.star or 0
-            evoAt[c] = nil
-            sendUpgrade(c)
-            task.wait(0.05)
+    -- upgrades one star at a time while the game's requirements allow it; returns how many stars it gained
+    local function upgradeChain(card)
+        local ok, gained = attemptUpgrade(card), 0
+        while ok do
+            gained = gained + 1
+            local i1 = infoOf(card)
+            if i1 and i1.star >= MAX_STAR then break end
+            task.wait(0.3)
+            local r2 = nextReq(card)
+            if not r2 or not r2.ready then break end
+            ok = attemptUpgrade(card)
         end
-        task.wait(1.5)
+        return gained
+    end
+    -- a card is complete when it is maxed or reached the "skip at" star; otherwise it stays in the queue
+    local function settle(card, gained)
+        tries[card] = 0
+        local i2 = infoOf(card)
+        local skipAt = tonumber(skipInp.Text) or 0
+        if i2 and (i2.star >= MAX_STAR or (skipAt > 0 and i2.star >= skipAt)) then markStatus(card, "done") end
+        L("upgraded " .. card .. " x" .. gained .. " -> star " .. tostring(i2 and i2.star))
+    end
+    -- upgrade attempts for cards that already have what the game asks for (start of a run / manual button)
+    local function cashIn(list)
         local n = 0
         for _, c in ipairs(list) do
-            local i = infoOf(c)
-            if evoAt[c] or (i and i.star > before[c]) then markStatus(c, "done") n = n + 1 end
+            local r = nextReq(c)
+            if not r or r.ready then
+                local g = upgradeChain(c)
+                if g > 0 then settle(c, g) n = n + 1 end
+            end
         end
         if n > 0 and SaveState then SaveState() end
         return n
     end
-    -- a trial just finished: attempt the upgrade, success = complete, failure = red and out of the queue
+    -- a trial just finished: upgrade as far as the game allows; only a real failed attempt counts against the card
     local function verifyAfterTrial(card)
         verifying[card] = true
-        local ok = attemptUpgrade(card)
+        task.wait(1) -- let the new completion count replicate
+        local r = nextReq(card)
+        if r and not r.ready then
+            L("not ready " .. card .. ": " .. (r.diff and ("needs " .. r.diff .. " completions") or ("needs " .. tostring(r.short))))
+            verifying[card] = nil
+            return
+        end
+        local gained = upgradeChain(card)
         verifying[card] = nil
-        if ok then
-            markStatus(card, "done")
+        if gained > 0 then
+            settle(card, gained)
         else
             tries[card] = (tries[card] or 0) + 1
             local limit = maxTries()
@@ -2186,15 +2326,40 @@ local function bStarTrial(pFrame, sData, pcData)
     end
 
     if trialRem then
-        trialRem.OnClientEvent:Connect(function(action, a)
+        trialRem.OnClientEvent:Connect(function(action, a, b)
             local t = os.clock()
-            if action == "StartFight" then
+            L("IN  " .. tostring(action) .. " " .. short(a) .. " " .. short(b))
+            if action == "StartTrial" then
+                trialOn, battle, chalAt = true, false, 0
+            elseif action == "Results" then
+                -- the trial is over: the card that was fighting counts as finished right now (no 8s wait)
+                trialOn, battle = false, false
+                if curCard then activeAt[curCard] = t - ACTIVE_FOR - 1 wasActive[curCard] = true end
+                if hideUI or noTp then
+                    task.delay(0.4, function()
+                        local okH, H = pcall(function() return require(RS.Client.UI.StarTrialHandler) end)
+                        if okH and type(H) == "table" and H.ContinueClicked then pcall(H.ContinueClicked) end
+                    end)
+                end
+            elseif action == "StartFight" then
+                battle = true
                 local mine = type(a) == "table" and a.Card
-                if mine then activeAt[mine] = t end
+                if mine then
+                    curCard = mine
+                    activeAt[mine] = t
+                    if startedAt[mine] and gotFirst[mine] ~= startedAt[mine] then
+                        gotFirst[mine] = startedAt[mine]
+                        latency = t - startedAt[mine]
+                    end
+                end
                 fightT = t
             elseif action == "Attack" then
-                if running and instant then pcall(function() trialRem:FireServer("AttackDone", a) end) end
+                if running and instant then
+                    L("OUT AttackDone (instant) " .. short(a))
+                    pcall(function() trialRem:FireServer("AttackDone", a) end)
+                end
             elseif action == "EnemyDefeated" then
+                battle = false
                 if fightT then
                     times[#times + 1] = t - fightT
                     if #times > 15 then table.remove(times, 1) end
@@ -2203,13 +2368,12 @@ local function bStarTrial(pFrame, sData, pcData)
                 end
             elseif action == "StageCleared" then
                 stages = stages + 1
+                battle = false
             elseif action == "EvolutionSuccess" then
                 upgrades = upgrades + 1
                 if type(a) == "string" then
                     tries[a] = 0
                     evoAt[a] = t
-                    markStatus(a, "done")
-                    if SaveState then SaveState() end
                 end
             end
             if not KNOWN[action] then lastOther = tostring(action) end
@@ -2227,19 +2391,122 @@ local function bStarTrial(pFrame, sData, pcData)
                     local i = infoOf(iN)
                     local limit = maxTries()
                     local stuck = limit > 0 and (tries[iN] or 0) >= limit
-                    if i and not stuck and not failed[iN] and not done[iN] and not (skip > 0 and i.star >= skip) then out[#out + 1] = iN end
+                    local blocked = false
+                    if string.sub(diffInp.Text, 1, 4) ~= "Auto" then
+                        local r = nextReq(iN)
+                        blocked = r ~= nil and r.diff ~= nil and diffRank(r.diff) > diffRank(diffInp.Text)
+                    end
+                    if i and not stuck and not blocked and not failed[iN] and not done[iN] and not (skip > 0 and i.star >= skip) then out[#out + 1] = iN end
                 end
             end
         end
         return out
     end
 
+    local function pickDifficulty(card)
+        if string.sub(diffInp.Text, 1, 4) ~= "Auto" then return diffInp.Text end
+        local r = nextReq(card)
+        return (r and (r.diff or r.top)) or "Hard"
+    end
     local function startTrial(card)
         startedAt[card] = os.clock()
         sent = sent + 1
+        local diff = pickDifficulty(card)
+        L("OUT AutoQueue true / Start " .. diff .. " " .. tostring(card) .. "")
         pcall(function() trialRem:FireServer("AutoQueue", true, {}) end)
-        pcall(function() trialRem:FireServer("Start", diffInp.Text, card) end)
+        pcall(function() trialRem:FireServer("Start", diff, card) end)
         pcall(function() trialRem:FireServer("AFK", false) end)
+    end
+
+    -- The game's own StarTrialHandler module does the teleport (TeleportToStartTrial / EndTrial -> lobby pivot).
+    -- It calls both through the module table, so swapping the table fields is enough, no function hooks.
+    local CS = game:GetService("CollectionService")
+    local handler, origFns = nil, nil
+    local function getHandler()
+        if handler then return handler end
+        local ok, m = pcall(function() return RS.Client.UI.StarTrialHandler end)
+        if ok and m then
+            local ok2, t = pcall(require, m)
+            if ok2 and type(t) == "table" then handler = t end
+        end
+        return handler
+    end
+    local function applyNoTp(on)
+        local H = getHandler()
+        if not H then L("no-teleport: StarTrialHandler module not reachable") return false end
+        if on and not origFns then
+            origFns = { tp = H.TeleportToStartTrial, fin = H.EndTrial }
+            H.TeleportToStartTrial = function() end
+            H.EndTrial = function()
+                H.InTrial = false
+                H.StartTime = nil
+                pcall(H.ShowPlayers)
+            end
+            L("no-teleport: game teleport and lobby return are now disabled")
+        elseif not on and origFns then
+            H.TeleportToStartTrial = origFns.tp
+            H.EndTrial = origFns.fin
+            origFns = nil
+            L("no-teleport: game teleport restored")
+        end
+        return true
+    end
+    local function nextEnemy()
+        local tag = tostring(LP.UserId) .. "-StarTrialEnemy"
+        local bestId, bestInst
+        for _, inst in ipairs(CS:GetTagged(tag)) do
+            local idx, card = inst:GetAttribute("EnemyIndex"), inst:GetAttribute("Card")
+            local id
+            if idx ~= nil and typeof(card) == "string" then id = tostring(idx) else id = inst.Name:match("^([^%-]+)%-(.+)$") end
+            if id and (not bestId or (tonumber(id) or 99) < (tonumber(bestId) or 99)) then bestId, bestInst = id, inst end
+        end
+        return bestId, bestInst
+    end
+    local function challenge()
+        local id, inst = nextEnemy()
+        if not id then return end
+        chalAt, chalN = os.clock(), chalN + 1
+        local hop = string.find(chalInp.Text, "Hop", 1, true) ~= nil
+        local ch, back = LP.Character, nil
+        if hop and inst and inst:IsA("BasePart") and ch then
+            pcall(function() back = ch:GetPivot() ch:PivotTo(inst.CFrame * CFrame.new(0, 0, 4)) end)
+            task.wait(0.15)
+        end
+        L("OUT Challenge " .. id .. (hop and " (hop)" or ""))
+        pcall(function() trialRem:FireServer("Challenge", id) end)
+        if back then
+            local t1 = os.clock()
+            while not battle and os.clock() - t1 < 2 do task.wait(0.05) end
+            task.wait(0.2)
+            pcall(function() ch:PivotTo(back) end)
+        end
+    end
+    local function startDriver(run)
+        task.spawn(function()
+            local pgui = LP:FindFirstChild("PlayerGui")
+            local ui0
+            while running and run == runId and mFrame:IsDescendantOf(game) do
+                local now = os.clock()
+                if hideUI and pgui then
+                    pcall(function()
+                        local g = pgui:FindFirstChild("StarTrial")
+                        if g then if ui0 == nil then ui0 = g.Enabled end g.Enabled = false end
+                        local b = pgui:FindFirstChild("UIBlackout")
+                        if b and b:FindFirstChild("Blackout") then b.Blackout.BackgroundTransparency = 1 end
+                    end)
+                end
+                -- the game's own flags say "in star trial" / "in battle"; other scripts read them to refuse teleports.
+                -- Nothing in the trial handler needs them without AFK mode, so keep them off while teleport blocking is on.
+                if noTp and handler then
+                    if handler.InTrial then handler.InTrial = false end
+                    if handler.InBattle then handler.InBattle = false end
+                end
+                -- no AFK mode: nothing walks to the enemies, so send Challenge ourselves
+                if trialOn and not battle and now - chalAt >= 1.2 then challenge() end
+                task.wait()
+            end
+            if pgui and ui0 ~= nil then pcall(function() local g = pgui:FindFirstChild("StarTrial") if g then g.Enabled = ui0 end end) end
+        end)
     end
 
     local function setRunning(on)
@@ -2250,12 +2517,23 @@ local function bStarTrial(pFrame, sData, pcData)
         stBtn.BackgroundColor3 = running and C3(200, 40, 40) or C3(40, 200, 120)
         if not running then
             sLbl.Text = "Status: Idle"
-            if was and trialRem then pcall(function() trialRem:FireServer("AutoQueue", false, {}) end) end
+            applyNoTp(false)
+            trialOn, battle = false, false
+            if was and trialRem then
+                L("OUT AutoQueue false (stopped)")
+                pcall(function() trialRem:FireServer("AutoQueue", false, {}) end)
+                saveLog()
+            end
             return
         end
         runId = runId + 1
         local run = runId
         tries, wasActive = {}, {}
+        local lastSaved = 0
+        startedAt, activeAt, verifying = {}, {}, {}
+        L("---- run started (difficulty " .. tostring(diffInp.Text) .. ", instant " .. tostring(instant) .. ", noTp " .. tostring(noTp) .. ", hideUI " .. tostring(hideUI) .. ", " .. tostring(chalInp.Text) .. ") ----")
+        applyNoTp(noTp)
+        startDriver(run)
         task.spawn(function()
             -- cash in any trial that was already won but not upgraded yet
             cashIn(queue())
@@ -2263,7 +2541,7 @@ local function bStarTrial(pFrame, sData, pcData)
                 local now = os.clock()
                 local list = queue()
                 local want = math.clamp(math.floor(tonumber(concInp.Text) or 1), 1, 5)
-                local every = math.max(tonumber(everyInp.Text) or 3, 1)
+                local every = math.max(tonumber(everyInp.Text) or 20, 1)
                 local busy, idle, live = 0, {}, {}
                 for i, c in ipairs(list) do
                     local isActive = activeAt[c] and now - activeAt[c] < ACTIVE_FOR
@@ -2284,6 +2562,7 @@ local function bStarTrial(pFrame, sData, pcData)
                     startTrial(e.c)
                     busy = busy + 1
                 end
+                if now - (lastSaved or 0) >= 5 then lastSaved = now saveLog() end
                 local avg = 0
                 for _, v in ipairs(times) do avg = avg + v end
                 avg = #times > 0 and avg / #times or 0
@@ -2296,6 +2575,7 @@ local function bStarTrial(pFrame, sData, pcData)
                     sLbl.Text = string.format("Running | queue %d | in trial: %s | fights %d | upgrades %d | done %d | failed %d | avg fight %.2fs",
                         #list, #live > 0 and table.concat(live, ", ") or "-", fights, upgrades, nDone, nFailed, avg)
                 end
+                if latency then sLbl.Text = sLbl.Text .. string.format(" | start to fight %.1fs", latency) end
                 if lastOther then sLbl.Text = sLbl.Text .. " | other event: " .. lastOther end
                 task.wait(0.5)
             end
@@ -2304,8 +2584,24 @@ local function bStarTrial(pFrame, sData, pcData)
 
     instBtn.MouseButton1Click:Connect(function()
         instant = not instant
-        instBtn.Text = (instant and "[X] " or "[ ] ") .. "Instant AttackDone"
+        instBtn.Text = (instant and "[X] " or "[ ] ") .. "Instant AttackDone (off = the game's own timing)"
         instBtn.BackgroundColor3 = instant and C3(40, 200, 120) or C3(50, 50, 50)
+        if SaveConfig then SaveConfig() end
+    end)
+    local function paintSwitch(b, on, text)
+        b.Text = (on and "[X] " or "[ ] ") .. text
+        b.BackgroundColor3 = on and C3(40, 200, 120) or C3(50, 50, 50)
+    end
+    local TP_TXT, UI_TXT = "Block the game's teleport (stay where you are)", "Hide the trial screen"
+    tpBtn.MouseButton1Click:Connect(function()
+        noTp = not noTp
+        paintSwitch(tpBtn, noTp, TP_TXT)
+        if running then applyNoTp(noTp) end
+        if SaveConfig then SaveConfig() end
+    end)
+    uiBtn.MouseButton1Click:Connect(function()
+        hideUI = not hideUI
+        paintSwitch(uiBtn, hideUI, UI_TXT)
         if SaveConfig then SaveConfig() end
     end)
     stBtn.MouseButton1Click:Connect(function() setRunning(not running) if SaveState then SaveState() end end)
@@ -2336,20 +2632,31 @@ local function bStarTrial(pFrame, sData, pcData)
     end)
 
     StarAPI.GetConfig = function()
-        return { diff = diffInp.Text, conc = concInp.Text, every = everyInp.Text, skip = skipInp.Text, fails = giveInp.Text, instant = instant }
+        return { diff = diffInp.Text, conc = concInp.Text, wait = everyInp.Text, skip = skipInp.Text, fails = giveInp.Text, instantAtk = instant, noTp = noTp, hideUI = hideUI, chal = chalInp.Text }
     end
     StarAPI.LoadConfig = function(c)
         if not c then return end
         if c.diff then diffInp.Text = tostring(c.diff) end
         if c.conc then concInp.Text = tostring(c.conc) end
-        if c.every then everyInp.Text = tostring(c.every) end
+        if c.wait then everyInp.Text = tostring(c.wait) end
         if c.skip then skipInp.Text = (tostring(c.skip) == "0") and "Off" or tostring(c.skip) end
         if c.fails then giveInp.Text = tostring(c.fails) end
-        if c.instant ~= nil then
-            instant = c.instant
-            instBtn.Text = (instant and "[X] " or "[ ] ") .. "Instant AttackDone"
+        if c.instantAtk ~= nil then
+            instant = c.instantAtk
+            instBtn.Text = (instant and "[X] " or "[ ] ") .. "Instant AttackDone (off = the game's own timing)"
             instBtn.BackgroundColor3 = instant and C3(40, 200, 120) or C3(50, 50, 50)
         end
+        if c.noTp ~= nil then
+            noTp = c.noTp
+            tpBtn.Text = (noTp and "[X] " or "[ ] ") .. "Block the game's teleport (stay where you are)"
+            tpBtn.BackgroundColor3 = noTp and C3(40, 200, 120) or C3(50, 50, 50)
+        end
+        if c.hideUI ~= nil then
+            hideUI = c.hideUI
+            uiBtn.Text = (hideUI and "[X] " or "[ ] ") .. "Hide the trial screen"
+            uiBtn.BackgroundColor3 = hideUI and C3(40, 200, 120) or C3(50, 50, 50)
+        end
+        if c.chal then chalInp.Text = tostring(c.chal) end
     end
     StarAPI.GetState = function()
         local names, seen = {}, {}
@@ -2361,13 +2668,13 @@ local function bStarTrial(pFrame, sData, pcData)
         for c in pairs(failed) do fl[#fl + 1] = c end
         for c in pairs(done) do dl[#dl + 1] = c end
         table.sort(fl) table.sort(dl)
-        return { on = running, items = names, failed = fl, done = dl }
+        return { on = running, items = names, failed = fl, done = dl, v = 2 }
     end
     StarAPI.LoadState = function(st)
         if not st then return end
         local want = {}
         for _, iN in ipairs(st.items or {}) do want[iN] = true end
-        for _, c in ipairs(st.failed or {}) do markStatus(c, "failed") end
+        if st.v == 2 then for _, c in ipairs(st.failed or {}) do markStatus(c, "failed") end end
         for _, c in ipairs(st.done or {}) do markStatus(c, "done") end
         for pN, d in pairs(SData) do
             for iN in pairs(d.items) do setItem(pN, iN, want[iN] == true) end
@@ -3114,8 +3421,8 @@ local sPnl = DS.card(sPage, "Account", nil, 1)
 local accInfoLbl = DS.new("TextLabel", sPnl, { Size = U2(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, Font = F_GM, TextSize = 12, TextColor3 = T.text2, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true, LayoutOrder = 1 })
 accInfoLbl.Text = "Account: " .. LP.Name .. "  |  UserId: " .. UID .. "\nConfig: " .. ConfigFileName .. "\nState: " .. StateFileName
 local prefPnl = DS.card(sPage, "Preferences", nil, 2)
-local scInp = mkDropdown(prefPnl, "UI Scale", { "0.6", "0.7", "0.8", "0.9", "1.0", "1.1", "1.2", "1.3", "1.5", "1.7", "2.0" }, "1.0", 75)
-scInp:GetPropertyChangedSignal("Text"):Connect(function() uiScale.Scale = tonumber(scInp.Text) or 1 end)
+local scInp = mkDropdown(prefPnl, "UI Scale (Auto sizes it for your screen / touch)", { "Auto", "0.6", "0.7", "0.8", "0.9", "1.0", "1.1", "1.2", "1.3", "1.5", "1.7", "2.0", "2.3", "2.6", "3.0" }, "Auto", 75)
+scInp:GetPropertyChangedSignal("Text"):Connect(function() applyScale(scInp.Text) end)
 
 local isAFK = true
 local afkBtn = DS.switch(prefPnl, "[X] Built-In Anti-AFK", 80)
@@ -3292,7 +3599,7 @@ local function InitAccountFiles()
     Persist.loadingCfg = true
     if cfg then
         try("settings", function()
-            if cfg.uiScale then scInp.Text = tostring(cfg.uiScale) uiScale.Scale = tonumber(scInp.Text) or 1 end
+            if cfg.uiScale then scInp.Text = tostring(cfg.uiScale) applyScale(scInp.Text) end
             if cfg.afk ~= nil then setAfkState(cfg.afk) end
             if cfg.fishDelay then fDelInp.Text = tostring(cfg.fishDelay) end
         end)
