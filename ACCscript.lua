@@ -1169,6 +1169,7 @@ local raidPacks = RaidConfig and RaidConfig.ActiveRaids or {}
 local raidListCard, raidPanel = DS.split(raidFrame, 260)
 local raidStatus = DS.status(raidPanel, "Status: Idle", 1)
 local raidBtn = DS.btn(raidPanel, "Start Auto-Raid", "ok", 2, 40)
+local raidVisBtn = DS.switch(raidPanel, "[X] No raid teleport / visuals", 3)
 DS.label(raidListCard, "Raid packs  -  tap to queue", 12, T.text2, F_GB).Position = U2(0, 12, 0, 8)
 local raidPackList = DS.new("ScrollingFrame", raidListCard, { Size = U2(1, -12, 1, -38), Position = U2(0, 6, 0, 32), ScrollBarThickness = 3, ScrollBarImageColor3 = T.stroke, AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = U2(0, 0, 0, 0) })
 local raidPackLayout = DS.vlist(raidPackList, 4)
@@ -1208,6 +1209,38 @@ for index, packName in ipairs(raidPacks) do
     end)
 end
 local raidRunning, raidRun = false, 0
+
+-- ===== no raid teleport / visuals =====
+-- The game's raid events all go through RaidHandler[eventName]; the raid itself is run by the server (the client never sends an attack
+-- answer), so swapping the UI / teleport functions for empty ones only removes what you see and where you get moved:
+--   JoinedRaid  : PivotTo into the arena, WalkSpeed = 0, opens the raid screen
+--   Results / LeftRaid / EnterRaidLobby : teleport to the raid lobby + screen flash, results screen
+--   the rest    : health bars, damage tweens, notifications, vote popups
+-- Joining and voting (the Join / Vote remote calls of Auto-Raid) are not touched. Only active while Auto-Raid runs.
+local raidNoVis, raidOrig = true, nil
+local RAID_NOOPS = { "JoinedRaid", "LeftRaid", "EnterRaidLobby", "ExitRaidLobby", "Results", "CheckpointReached", "RaidNotify", "Revived",
+    "PlayerJoinedRaid", "PlayerLeftRaid", "PlayerAttack", "BossAttack", "PlayerDied", "PlayerCardDefeated", "CardDefeated",
+    "ShowFrame", "InitEnemy", "InitPlayer", "VoteStart", "VoteEnd", "UpdateVotes" }
+local function applyRaidVis(on)
+    local H
+    pcall(function() H = require(RS.Client.UI.RaidHandler) end)
+    if type(H) ~= "table" then return end
+    if on and not raidOrig then
+        raidOrig = {}
+        for _, name in ipairs(RAID_NOOPS) do
+            if type(H[name]) == "function" then raidOrig[name] = H[name] H[name] = function() end end
+        end
+    elseif not on and raidOrig then
+        for name, fn in pairs(raidOrig) do H[name] = fn end
+        raidOrig = nil
+    end
+end
+raidVisBtn.MouseButton1Click:Connect(function()
+    raidNoVis = not raidNoVis
+    raidVisBtn.Text = (raidNoVis and "[X] " or "[ ] ") .. "No raid teleport / visuals"
+    applyRaidVis(raidRunning and raidNoVis)
+    if SaveConfig then SaveConfig() end
+end)
 
 local function getRaidQueue()
     local queue = {}
@@ -1253,6 +1286,7 @@ refreshRaidPackRows()
 task.spawn(function()
     while raidPanel:IsDescendantOf(game) do
         refreshRaidPackRows()
+        if not raidRunning and raidOrig then applyRaidVis(false) end
         task.wait(2)
     end
 end)
@@ -1261,6 +1295,7 @@ local function setRaidState(state)
     raidRunning, raidRun = state, raidRun + 1
     local myRun = raidRun
     raidBtn.Text, raidBtn.BackgroundColor3 = raidRunning and "Stop Auto-Raid" or "Start Auto-Raid", raidRunning and C3(200, 40, 40) or C3(40, 200, 120)
+    applyRaidVis(raidRunning and raidNoVis)
     if not raidRunning then
         raidStatus.Text = "Status: Idle"
         return
@@ -3924,7 +3959,7 @@ end
 
 function Persist.buildConfig()
     return {
-        userId = LP.UserId, accountName = LP.Name, uiScale = scInp.Text, afk = isAFK, fishDelay = fDelInp.Text,
+        userId = LP.UserId, accountName = LP.Name, uiScale = scInp.Text, afk = isAFK, fishDelay = fDelInp.Text, raidNoVis = raidNoVis,
         grader = Persist.safe(GraderAPI.GetConfig),
         tower = Persist.safe(TowerAPI.GetConfig),
         auto = Persist.safe(AutoAPI.GetConfig),
@@ -4010,6 +4045,11 @@ local function InitAccountFiles()
             if cfg.uiScale then scInp.Text = tostring(cfg.uiScale) applyScale(scInp.Text) end
             if cfg.afk ~= nil then setAfkState(cfg.afk) end
             if cfg.fishDelay then fDelInp.Text = tostring(cfg.fishDelay) end
+            if cfg.raidNoVis ~= nil then
+                raidNoVis = cfg.raidNoVis and true or false
+                raidVisBtn.Text = (raidNoVis and "[X] " or "[ ] ") .. "No raid teleport / visuals"
+                applyRaidVis(raidRunning and raidNoVis)
+            end
         end)
         try("grader config", function() if cfg.grader then GraderAPI.LoadConfig(cfg.grader) end end)
         try("tower config", function() if cfg.tower then TowerAPI.LoadConfig(cfg.tower) end end)
