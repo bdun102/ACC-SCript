@@ -737,7 +737,7 @@ do
     tabLayout.Parent = tabC
     DS.pad(tabC, 10, 4, 10, 4)
 
-    local tabNames = { "Cards", "Tower", "Auto Tower", "Star Trial", "Opener", "Figurines", "Market", "Raid", "Fish", "Gems", "HUD", "Spy", "Settings" }
+    local tabNames = { "Cards", "Tower", "Auto Tower", "Star Trial", "Opener", "Figurines", "Market", "Raid", "Fish", "Gems", "Exchange", "HUD", "Spy", "Settings" }
     for i, name in ipairs(tabNames) do
         local b = DS.new("TextButton", tabC, { Size = U2(0, 0, 1, 0), AutomaticSize = Enum.AutomaticSize.X, LayoutOrder = i, BackgroundColor3 = T.surface3, Text = name, Font = F_GB, TextSize = 12 })
         DS.corner(b, 8) DS.pad(b, 12, 0, 12, 0)
@@ -758,7 +758,7 @@ do
     for i, btn in ipairs(tBtns) do btn.MouseButton1Click:Connect(function() selectTab(i) end) end
     selectTab(1)
 end
-local cFrame, tFrame, autoFrame, starFrame, oFrame, figFrame, mktFrame, raidFrame, fFrame, gFrame, hudTabFrame, spyFrame, sFrame = unpack(tFrames)
+local cFrame, tFrame, autoFrame, starFrame, oFrame, figFrame, mktFrame, raidFrame, fFrame, gFrame, exFrame, hudTabFrame, spyFrame, sFrame = unpack(tFrames)
 
 minBtn.MouseButton1Click:Connect(function() mFrame.Visible = false sqBtn.Visible = true end)
 sqBtn.MouseButton1Click:Connect(function()
@@ -3186,6 +3186,20 @@ local function bOpener(pFrame, sData)
         end
     end
 
+    -- mutation filter for the queue (set by the dropdown below)
+    local MUT_OPTS = { "All mutations", "Regular", "Gold", "Emerald", "Void", "Diamond", "Rainbow" }
+    local mutFilterInp
+    local function mutOf(bN)
+        local base = bN:gsub("%-Bundle$", "")
+        for i = 6, 2, -1 do if base:sub(-(#MUT_OPTS[i + 1] + 1)) == "-" .. MUT_OPTS[i + 1] then return MUT_OPTS[i + 1] end end
+        if bN:find("%-Regular%-Bundle$") then return "Regular" end
+        return "Regular"
+    end
+    local function passes(bN)
+        local f = mutFilterInp and mutFilterInp.Text or MUT_OPTS[1]
+        return f == MUT_OPTS[1] or mutOf(bN) == f
+    end
+
     for lIdx, pD in ipairs(sData) do
         local pN = pD.Name 
         SData[pN] = { isSelected = false, items = {} }
@@ -3208,6 +3222,7 @@ local function bOpener(pFrame, sData)
                 if SaveState then SaveState() end
             end)
             table.insert(iBtns, {btn=ib, name=bN, update = function(s) 
+                s = s and passes(bN)
                 SData[pN].items[bN] = s 
                 local cnt = getOwnedPackCount(bN)
                 ib.Text = "   ↳ "..(s and "[X] " or "[ ] ")..bN .. (cnt > 0 and (" (" .. cnt .. ")") or "")
@@ -3231,6 +3246,7 @@ local function bOpener(pFrame, sData)
     local bundlesOnly = true
     local bOnlyBtn = DS.switch(rPnl, "[X] Bundles Only", 0)
 
+    mutFilterInp = mkDropdown(rPnl, "Only this mutation (Scan / Select all)", MUT_OPTS, MUT_OPTS[1], 10)
     local opScanBtn = DS.btn(rPnl, "Scan Bag & Queue", "info", 20, 36)
 
     bOnlyBtn.MouseButton1Click:Connect(function()
@@ -3249,7 +3265,7 @@ local function bOpener(pFrame, sData)
             for bName, _ in pairs(pD.items) do
                 local owned = tonumber(packsData[bName]) or 0
                 local isBundle = string.find(bName, "%-Bundle$") ~= nil
-                local shouldQueue = (owned > 0) and (not bundlesOnly or isBundle)
+                local shouldQueue = (owned > 0) and (not bundlesOnly or isBundle) and passes(bName)
                 pD.items[bName] = shouldQueue
                 if BundleBtnMap[bName] then
                     BundleBtnMap[bName].Text = "   ↳ " .. (shouldQueue and "[X] " or "[ ] ") .. bName .. (owned > 0 and (" (" .. owned .. ")") or "")
@@ -3564,13 +3580,14 @@ local function bOpener(pFrame, sData)
     end
     opBtn.MouseButton1Click:Connect(function() setOpenerRunning(not isOpener) if SaveState then SaveState() end end)
 
-    OpenerAPI.GetConfig = function() return {potion = opPotInp.Text, amt = opAmtInp.Text, spd = opSpdInp.Text, delay = opDelInp.Text, bundlesOnly = bundlesOnly} end
+    OpenerAPI.GetConfig = function() return {potion = opPotInp.Text, amt = opAmtInp.Text, spd = opSpdInp.Text, delay = opDelInp.Text, bundlesOnly = bundlesOnly, mutFilter = mutFilterInp.Text} end
     OpenerAPI.LoadConfig = function(cfg)
         if type(cfg) ~= "table" then return end
         if cfg.potion then opPotInp.Text = tostring(cfg.potion) end
         if cfg.amt then opAmtInp.Text = tostring(cfg.amt) end
         if cfg.spd then opSpdInp.Text = tostring(cfg.spd) end
         if cfg.delay then opDelInp.Text = tostring(cfg.delay) end
+        for _, o in ipairs(MUT_OPTS) do if cfg.mutFilter == o then mutFilterInp.Text = o end end
         if cfg.bundlesOnly ~= nil then
             bundlesOnly = cfg.bundlesOnly == true
             bOnlyBtn.Text = bundlesOnly and "[X] Bundles Only" or "[ ] All Packs+Bundles"
@@ -3857,6 +3874,368 @@ end
 buildFigurineGrader(figFrame)
 
 -- ==========================================
+-- PACK EXCHANGE (auto upgrade / downgrade of packs to one rank)
+-- ==========================================
+-- Packs come in ranks Regular < Gold < Emerald < Void < Diamond < Rainbow and are stored as Packs["<pack>"] (Regular) and
+-- Packs["<pack>-<rank>"]. From the game's PackExchange code:
+--   Downgrade : Card:FireServer("Downgrade", pack, rank [, amount])   1 pack of <rank> -> Reward packs of the rank below, costs cash
+--   Upgrade   : Card:FireServer("Exchange", pack, fromRank, toRank, amount)   Requirement packs of fromRank -> 1 pack of toRank
+-- The game does not tell us why a request is refused (cash, packs...), so every request is checked against the pack counts afterwards.
+local ExchangeAPI = {}
+local function buildExchange(parent)
+    local RANKS = { "Regular", "Gold", "Emerald", "Void", "Diamond", "Rainbow" }
+    local REQ = { 0, 35, 25, 20, 15, 10 }
+    local REWARD = { 0, 12, 8, 6, 4, 3 }
+    pcall(function()
+        local px = require(RS.Modules.Config.Core.PackExchange)
+        for r = 2, 6 do
+            local nm = RANKS[r]
+            if type(px[nm]) == "table" and tonumber(px[nm].Requirement) then REQ[r] = px[nm].Requirement end
+            if type(px.Downgrade) == "table" and type(px.Downgrade[nm]) == "table" and tonumber(px.Downgrade[nm].Reward) then REWARD[r] = px.Downgrade[nm].Reward end
+        end
+    end)
+    local CardRemote = getRemote("Card")
+
+    local function fmt(n)
+        local str, r = tostring(math.floor(tonumber(n) or 0))
+        repeat str, r = str:gsub("^(-?%d+)(%d%d%d)", "%1,%2") until r == 0
+        return str
+    end
+    local function owned(p, r)
+        local v = tonumber(getLiveData("Packs", r == 1 and p or (p .. "-" .. RANKS[r])))
+        return v and math.floor(v) or 0
+    end
+    local function rankIndex(name) for i, n in ipairs(RANKS) do if n == name then return i end end return 1 end
+    local MULT = { 1, 5, 10, 25, 60, 140 }
+    pcall(function()
+        local m = require(RS.Modules.Config.Core.Mutations)
+        for r = 2, 6 do if type(m[RANKS[r]]) == "table" and tonumber(m[RANKS[r]].PriceMultiplier) then MULT[r] = m[RANKS[r]].PriceMultiplier end end
+    end)
+    local CardCfg
+    pcall(function() CardCfg = require(RS.Modules.Config.Core.CardConfig) end)
+    local function bundleOwned(p, r)
+        local v = tonumber(getLiveData("Packs", p .. "-" .. RANKS[r] .. "-Bundle"))
+        return v and math.floor(v) or 0
+    end
+    local function rnd(x) return math.floor(x + 0.5) end
+    -- the game's own cash price per unit of a step (nil if the pack config can't be read: then retries are used instead)
+    local function unitCost(kind, p, r)
+        local info = CardCfg and type(CardCfg.Packs) == "table" and CardCfg.Packs[p]
+        local price = type(info) == "table" and tonumber(info.Price)
+        if not price then return nil end
+        if kind == "up" then return math.ceil(price * REQ[r + 1] * MULT[r + 1]) end
+        if kind == "down" then return math.ceil(math.ceil(price * REQ[r] * MULT[r]) * math.min(tonumber(info.Chance) or 1, 0.25)) end
+        local base = rnd(price * (r > 1 and MULT[r] or 1))
+        if kind == "bundle" then return base end
+        return math.ceil(base * 0.5)
+    end
+    local function cashNow() return tonumber(getLiveData("Cash")) end
+
+    local listCard, controls = DS.split(parent, 300)
+    local selected, buttons, order = {}, {}, {}
+    local allBtn, noneBtn, list = DS.tree(listCard)
+
+    local status = DS.status(controls, "Status: Idle", 1)
+    local targetInp = DS.dropdown(controls, "Exchange selected packs to mutation (upgrades and downgrades as needed)", RANKS, "Regular", 2)
+    local BUNDLE_OPTS = { "Leave bundles alone", "Unbundle all bundles first", "Bundle packs at target rank after", "Unbundle first, then bundle at the end" }
+    local bundleInp = DS.dropdown(controls, "Bundles (5 packs = 1 bundle)", BUNDLE_OPTS, BUNDLE_OPTS[1], 3)
+    local scanBtn = DS.btn(controls, "Scan Inventory", "info", 4, 32)
+    local previewBtn = DS.btn(controls, "Preview plan (changes nothing)", "info", 5, 32)
+    local startBtn = DS.btn(controls, "Start", "ok", 6, 38)
+    local logLbl = DS.status(controls, "Tick packs, pick a mutation, then Preview or Start. Amounts are worked out from your packs and cash and sent as one request per step. Anything the game needs more of for a full upgrade is left as is and reported.", 7)
+
+    local logLines = {}
+    local function say(t)
+        logLines[#logLines + 1] = t
+        while #logLines > 14 do table.remove(logLines, 1) end
+        logLbl.Text = table.concat(logLines, "\n")
+    end
+
+    local function summary(p)
+        local parts = {}
+        for r = 6, 1, -1 do
+            local c = owned(p, r)
+            if c > 0 then parts[#parts + 1] = fmt(c) .. " " .. RANKS[r] end
+        end
+        return #parts > 0 and table.concat(parts, " · ") or "none"
+    end
+    local function paintRow(p)
+        local row = buttons[p]
+        if not row then return end
+        local total = 0
+        for r = 1, 6 do
+            local c = owned(p, r)
+            total = total + c
+            local txt = RANKS[r] .. "   " .. fmt(c)
+            if row.labels[r].Text ~= txt then row.labels[r].Text = txt end
+            row.labels[r].TextColor3 = c > 0 and C3(225, 225, 225) or C3(110, 110, 110)
+        end
+        local txt = " " .. (selected[p] and "[X] " or "[ ] ") .. p .. "   " .. summary(p)
+        if row.check.Text ~= txt then row.check.Text = txt end
+        row.check.TextColor3 = selected[p] and C3(40, 220, 130) or (total > 0 and C3(210, 210, 210) or C3(120, 120, 120))
+    end
+    local function selectedCount() local n = 0 for _ in pairs(selected) do n = n + 1 end return n end
+    for index, pD in ipairs(CardSortedPacks) do
+        local p = pD.Name
+        order[#order + 1] = p
+        local pC, eBtn, cBtn, iF = DS.pack(list, index, p)
+        local labels = {}
+        for r = 6, 1, -1 do
+            labels[r] = DS.new("TextLabel", iF, { Size = U2(1, 0, 0, 20), LayoutOrder = 7 - r, Text = RANKS[r], Font = F_GM, TextSize = 12, TextColor3 = T.text3, TextXAlignment = Enum.TextXAlignment.Left })
+        end
+        buttons[p] = { check = cBtn, labels = labels }
+        eBtn.MouseButton1Click:Connect(function()
+            iF.Visible = not iF.Visible
+            eBtn.Text = iF.Visible and "-" or "+"
+        end)
+        cBtn.MouseButton1Click:Connect(function()
+            selected[p] = not selected[p] or nil
+            paintRow(p)
+            if SaveConfig then SaveConfig() end
+        end)
+    end
+    allBtn.MouseButton1Click:Connect(function() for _, p in ipairs(order) do selected[p] = true paintRow(p) end if SaveConfig then SaveConfig() end end)
+    noneBtn.MouseButton1Click:Connect(function() for _, p in ipairs(order) do selected[p] = nil paintRow(p) end if SaveConfig then SaveConfig() end end)
+    local function refreshRows() for _, p in ipairs(order) do paintRow(p) end end
+    refreshRows()
+
+    local function selectedList()
+        local out = {}
+        for _, p in ipairs(order) do if selected[p] then out[#out + 1] = p end end
+        return out
+    end
+    local function wantDown() return true end
+    local function wantUp() return true end
+
+    local function wantUnbundle() local t = bundleInp.Text return t == BUNDLE_OPTS[2] or t == BUNDLE_OPTS[4] end
+    local function wantBundle() local t = bundleInp.Text return t == BUNDLE_OPTS[3] or t == BUNDLE_OPTS[4] end
+
+    -- what a run would do for one pack, from its current counts (also used for the preview)
+    local function plan(p, target)
+        local c, lines = {}, {}
+        for r = 1, 6 do c[r] = owned(p, r) end
+        if wantUnbundle() then
+            for r = 1, 6 do
+                local b = bundleOwned(p, r)
+                if b > 0 then
+                    lines[#lines + 1] = string.format("  unbundle %s %s bundles -> %s packs", fmt(b), RANKS[r], fmt(b * 5))
+                    c[r] = c[r] + b * 5
+                end
+            end
+        end
+        if wantDown() then
+            for r = 6, target + 1, -1 do
+                if c[r] > 0 then
+                    local gain = c[r] * REWARD[r]
+                    lines[#lines + 1] = string.format("  downgrade %s %s -> %s %s", fmt(c[r]), RANKS[r], fmt(gain), RANKS[r - 1])
+                    c[r - 1], c[r] = c[r - 1] + gain, 0
+                end
+            end
+        end
+        if wantUp() then
+            for r = 1, target - 1 do
+                local n = math.floor(c[r] / REQ[r + 1])
+                if n > 0 then
+                    lines[#lines + 1] = string.format("  upgrade %s %s -> %s %s (uses %s)", fmt(n * REQ[r + 1]), RANKS[r], fmt(n), RANKS[r + 1], fmt(n * REQ[r + 1]))
+                    c[r + 1], c[r] = c[r + 1] + n, c[r] - n * REQ[r + 1]
+                end
+                if c[r] > 0 then
+                    lines[#lines + 1] = string.format("  left over: %s %s (needs %d for one %s)", fmt(c[r]), RANKS[r], REQ[r + 1], RANKS[r + 1])
+                end
+            end
+        end
+        lines[#lines + 1] = "  result: " .. fmt(c[target]) .. " " .. RANKS[target]
+        if wantBundle() then
+            local nb = math.floor(c[target] / 5)
+            if nb > 0 then lines[#lines + 1] = string.format("  bundle %s %s packs -> %s bundles (%s packs left)", fmt(nb * 5), RANKS[target], fmt(nb), fmt(c[target] - nb * 5)) end
+        end
+        return lines
+    end
+
+    local function doScan()
+        refreshRows()
+        local packsOwned, total = 0, 0
+        for _, p in ipairs(order) do
+            local any = false
+            for r = 1, 6 do local c = owned(p, r) total = total + c if c > 0 then any = true end end
+            if any then packsOwned = packsOwned + 1 end
+        end
+        status.Text = string.format("Status: scanned - %d of %d packs in your inventory (%s packs in total)", packsOwned, #order, fmt(total))
+    end
+    scanBtn.MouseButton1Click:Connect(doScan)
+    previewBtn.MouseButton1Click:Connect(function()
+        logLines = {}
+        local packs = selectedList()
+        if #packs == 0 then say("Select at least one pack first.") return end
+        local target = rankIndex(targetInp.Text)
+        say("Preview for target " .. RANKS[target] .. " (nothing is sent):")
+        for i, p in ipairs(packs) do
+            if i > 6 then say("... and " .. (#packs - 6) .. " more packs") break end
+            say(p)
+            for _, l in ipairs(plan(p, target)) do say(l) end
+        end
+    end)
+
+    -- one request at a time; the game's own reply is not visible to us, so success = the source count dropped
+    local running, runId = false, 0
+    local function srcCount(kind, p, r) if kind == "unbundle" then return bundleOwned(p, r) end return owned(p, r) end
+    local function settle(kind, p, r, before)
+        local t0 = os.clock()
+        while os.clock() - t0 < 2.5 do
+            task.wait(0.1)
+            local now = srcCount(kind, p, r)
+            if now < before then
+                task.wait(0.25)
+                return before - srcCount(kind, p, r)
+            end
+        end
+        return 0
+    end
+    -- kinds: "down" n packs of rank r -> rank r-1 | "up" n exchanges r -> r+1 | "bundle" n bundles from rank r packs | "unbundle" n bundles of rank r
+    local function runStep(kind, p, r, n, myRun)
+        local done, guess = 0, n
+        while done < n and running and runId == myRun do
+            local amt = math.min(guess, n - done)
+            local before = srcCount(kind, p, r)
+            local ok = pcall(function()
+                local a = tostring(amt)
+                if kind == "down" then
+                    if amt <= 1 then CardRemote:FireServer("Downgrade", p, RANKS[r]) else CardRemote:FireServer("Downgrade", p, RANKS[r], a) end
+                elseif kind == "up" then
+                    CardRemote:FireServer("Exchange", p, RANKS[r], RANKS[r + 1], a)
+                elseif kind == "bundle" then
+                    if amt <= 1 then CardRemote:FireServer("Bundle", p, RANKS[r]) else CardRemote:FireServer("Bundle", p, RANKS[r], a) end
+                else
+                    local key = p .. "-" .. RANKS[r] .. "-Bundle"
+                    if amt <= 1 then CardRemote:FireServer("Unbundle", key) else CardRemote:FireServer("Unbundle", key, a) end
+                end
+            end)
+            if not ok then return done, "send failed" end
+            local used = settle(kind, p, r, before)
+            if used > 0 then
+                local gained = used
+                if kind == "up" then gained = math.floor(used / REQ[r + 1]) elseif kind == "bundle" then gained = math.floor(used / 5) end
+                if gained <= 0 then return done, "unexpected pack change" end
+                done = done + gained
+                guess = n - done
+            elseif amt > 1 then
+                guess = math.floor(amt / 2) -- an all-or-nothing request that was refused: try half
+            else
+                return done, "refused"
+            end
+            task.wait(0.3)
+        end
+        return done, nil
+    end
+
+    local function setRunning(on)
+        running = on and CardRemote ~= nil
+        runId = runId + 1
+        startBtn.Text = CardRemote and (running and "Stop" or "Start") or "ERR: Card remote missing"
+        startBtn.BackgroundColor3 = running and C3(200, 40, 40) or C3(40, 200, 120)
+        if not running then status.Text = "Status: Idle" return end
+        local myRun = runId
+        task.spawn(function()
+            logLines = {}
+            local packs = selectedList()
+            local target = rankIndex(targetInp.Text)
+            if #packs == 0 then say("Select at least one pack first.") running = false end
+            local stopReason
+            local VERB = { down = "downgraded", up = "upgraded", bundle = "bundled", unbundle = "unbundled" }
+            for _, p in ipairs(packs) do
+                if not running or runId ~= myRun or stopReason then break end
+                say(p)
+                local function alive() return running and runId == myRun and not stopReason end
+                local function step(kind, r, n)
+                    local want = n
+                    -- exact cash limit from the game's own price formula
+                    local unit = unitCost(kind, p, r)
+                    local cash = cashNow()
+                    local capped = false
+                    if unit and unit > 0 and cash then
+                        local afford = math.floor(cash / unit)
+                        if afford < n then
+                            if afford <= 0 then
+                                stopReason = string.format("Not enough cash for %s %s (%s each, you have %s).", kind, RANKS[r], fmt(unit), fmt(cash))
+                                say("  " .. stopReason)
+                                return
+                            end
+                            n, capped = afford, true
+                        end
+                    end
+                    status.Text = string.format("Status: %s - %s %s (%s)", p, kind, RANKS[r], fmt(n))
+                    local done, err = runStep(kind, p, r, n, myRun)
+                    say(string.format("  %s %s of %s %s%s", VERB[kind], fmt(done), fmt(want), kind == "unbundle" and (RANKS[r] .. " bundles") or RANKS[r], capped and (" (cash limit, " .. fmt(unit) .. " each)") or ""))
+                    if err then
+                        stopReason = string.format("The game did not accept the %s of %s %s for %s (%s). Cash now: %s", kind, RANKS[r], kind == "bundle" and "packs" or "", p, err, fmt(getLiveData("Cash") or 0))
+                    elseif capped then
+                        stopReason = "Out of cash (spent down to the last affordable amount, cash now " .. fmt(getLiveData("Cash") or 0) .. ")."
+                    end
+                end
+                if wantUnbundle() then
+                    for r = 1, 6 do
+                        if not alive() then break end
+                        local b = bundleOwned(p, r)
+                        if b > 0 then step("unbundle", r, b) end
+                    end
+                end
+                if wantDown() then
+                    for r = 6, target + 1, -1 do
+                        if not alive() then break end
+                        local c = owned(p, r)
+                        if c > 0 then step("down", r, c) end
+                    end
+                end
+                if wantUp() then
+                    for r = 1, target - 1 do
+                        if not alive() then break end
+                        local c = owned(p, r)
+                        local n = math.floor(c / REQ[r + 1])
+                        if n > 0 then step("up", r, n) end
+                        local left = owned(p, r)
+                        if left > 0 and not stopReason then say(string.format("  left over: %s %s (needs %d for one %s)", fmt(left), RANKS[r], REQ[r + 1], RANKS[r + 1])) end
+                    end
+                end
+                if wantBundle() and alive() then
+                    local nb = math.floor(owned(p, target) / 5)
+                    if nb > 0 then step("bundle", target, nb) end
+                end
+                refreshRows()
+            end
+            if runId == myRun then
+                running = false
+                startBtn.Text, startBtn.BackgroundColor3 = "Start", C3(40, 200, 120)
+                status.Text = "Status: " .. (stopReason and "Stopped" or "Done")
+                if stopReason then say("STOPPED: " .. stopReason) else say("Done.") end
+            end
+        end)
+    end
+    startBtn.MouseButton1Click:Connect(function() setRunning(not running) end)
+
+    task.spawn(function()
+        while parent:IsDescendantOf(game) do
+            if parent.Visible then refreshRows() end
+            task.wait(2)
+        end
+    end)
+
+    ExchangeAPI.GetConfig = function()
+        return { target = targetInp.Text, bundles = bundleInp.Text, packs = selectedList() }
+    end
+    ExchangeAPI.LoadConfig = function(c)
+        if type(c) ~= "table" then return end
+        if c.target and RANKS[rankIndex(c.target)] == c.target then targetInp.Text = c.target end
+        for _, o in ipairs(BUNDLE_OPTS) do if c.bundles == o then bundleInp.Text = o end end
+        selected = {}
+        for _, p in ipairs(c.packs or {}) do if buttons[p] then selected[p] = true end end
+        refreshRows()
+    end
+    setRunning(false)
+    doScan()
+end
+buildExchange(exFrame)
+
+-- ==========================================
 -- 10. SETTINGS TAB & AUTO-SYNC ENGINE
 -- ==========================================
 local sPage = DS.page(sFrame)
@@ -3966,6 +4345,7 @@ function Persist.buildConfig()
         star = Persist.safe(StarAPI.GetConfig),
         opener = Persist.safe(OpenerAPI.GetConfig),
         fig = Persist.safe(FigurineAPI.GetConfig),
+        exchange = Persist.safe(ExchangeAPI.GetConfig),
     }
 end
 
@@ -4057,6 +4437,7 @@ local function InitAccountFiles()
         try("star config", function() if cfg.star then StarAPI.LoadConfig(cfg.star) end end)
         try("opener config", function() if cfg.opener then OpenerAPI.LoadConfig(cfg.opener) end end)
         try("figurine config", function() if cfg.fig then FigurineAPI.LoadConfig(cfg.fig) end end)
+        try("exchange config", function() if cfg.exchange then ExchangeAPI.LoadConfig(cfg.exchange) end end)
     end
 
     Persist.loadingCfg = false
