@@ -556,6 +556,70 @@ pcall(function()
     table.sort(CardSortedPacks, function(a, b) return a.Price < b.Price end)
 end)
 
+-- cards whose star trial failed, kept in their own file so the list survives restarts and "Reset Account State"
+local FailedStore = { cards = {}, file = "ACC_FailedCards_" .. tostring(LP.UserId) .. ".json" }
+pcall(function()
+    if readfile and isfile and isfile(FailedStore.file) then
+        local d = HS:JSONDecode(readfile(FailedStore.file))
+        if type(d) == "table" and type(d.cards) == "table" then
+            for _, c in ipairs(d.cards) do if type(c) == "string" then FailedStore.cards[c] = true end end
+        end
+    end
+end)
+function FailedStore.save()
+    if not writefile then return end
+    local list = {}
+    for c in pairs(FailedStore.cards) do list[#list + 1] = c end
+    table.sort(list)
+    local packs = FailedStore.packs()
+    pcall(writefile, FailedStore.file, HS:JSONEncode({ cards = list, packs = packs }))
+end
+function FailedStore.set(card, isFailed)
+    if (FailedStore.cards[card] == true) == (isFailed == true) then return end
+    FailedStore.cards[card] = isFailed and true or nil
+    FailedStore.save()
+end
+-- packs (in shop order) that contain at least one failed card
+function FailedStore.packs()
+    local out = {}
+    for _, pD in ipairs(CardSortedPacks) do
+        for _, c in ipairs(CardPackCards[pD.Name] or {}) do
+            if FailedStore.cards[c] then out[#out + 1] = pD.Name break end
+        end
+    end
+    return out
+end
+
+-- Resume helper: a feature that was running when you left is started again until it really runs (the game data it needs,
+-- e.g. your figurines or owned packs, can arrive later than the cards). While it is pending, the saved "was running" flag is kept,
+-- so a slow start can never overwrite it.
+local Resume = { pending = {}, tok = {} }
+function Resume.cancel(label)
+    Resume.tok[label] = (Resume.tok[label] or 0) + 1
+    Resume.pending[label] = nil
+end
+function Resume.start(label, isRunning, start)
+    Resume.tok[label] = (Resume.tok[label] or 0) + 1
+    local my = Resume.tok[label]
+    Resume.pending[label] = true
+    task.spawn(function()
+        task.wait(2)
+        local t0 = os.clock()
+        while Resume.tok[label] == my and os.clock() - t0 < 90 do
+            if isRunning() then break end
+            pcall(start)
+            local started = false
+            for _ = 1, 15 do
+                task.wait(0.1)
+                if isRunning() then started = true break end
+            end
+            if started then break end
+            task.wait(2.5)
+        end
+        if Resume.tok[label] == my then Resume.pending[label] = nil end
+    end)
+end
+
 -- ==========================================
 -- 2. STRICT DIRECT UI LOOKUP
 -- ==========================================
@@ -737,7 +801,7 @@ do
     tabLayout.Parent = tabC
     DS.pad(tabC, 10, 4, 10, 4)
 
-    local tabNames = { "Cards", "Tower", "Auto Tower", "Star Trial", "Opener", "Figurines", "Market", "Raid", "Fish", "Gems", "Exchange", "HUD", "Spy", "Settings" }
+    local tabNames = { "Cards", "Tower", "Auto Tower", "Star Trial", "Opener", "Figurines", "Market", "Raid", "Fish", "Gems", "Exchange", "Collect", "HUD", "Spy", "Settings" }
     for i, name in ipairs(tabNames) do
         local b = DS.new("TextButton", tabC, { Size = U2(0, 0, 1, 0), AutomaticSize = Enum.AutomaticSize.X, LayoutOrder = i, BackgroundColor3 = T.surface3, Text = name, Font = F_GB, TextSize = 12 })
         DS.corner(b, 8) DS.pad(b, 12, 0, 12, 0)
@@ -758,7 +822,7 @@ do
     for i, btn in ipairs(tBtns) do btn.MouseButton1Click:Connect(function() selectTab(i) end) end
     selectTab(1)
 end
-local cFrame, tFrame, autoFrame, starFrame, oFrame, figFrame, mktFrame, raidFrame, fFrame, gFrame, exFrame, hudTabFrame, spyFrame, sFrame = unpack(tFrames)
+local cFrame, tFrame, autoFrame, starFrame, oFrame, figFrame, mktFrame, raidFrame, fFrame, gFrame, exFrame, colFrame, hudTabFrame, spyFrame, sFrame = unpack(tFrames)
 
 minBtn.MouseButton1Click:Connect(function() mFrame.Visible = false sqBtn.Visible = true end)
 sqBtn.MouseButton1Click:Connect(function()
@@ -1170,6 +1234,8 @@ local raidListCard, raidPanel = DS.split(raidFrame, 260)
 local raidStatus = DS.status(raidPanel, "Status: Idle", 1)
 local raidBtn = DS.btn(raidPanel, "Start Auto-Raid", "ok", 2, 40)
 local raidVisBtn = DS.switch(raidPanel, "[X] No raid teleport / visuals", 3)
+local raidJoinAll = false
+local raidAllBtn = DS.switch(raidPanel, "[ ] Join ALL raids (needed for manga tokens)", 4)
 DS.label(raidListCard, "Raid packs  -  tap to queue", 12, T.text2, F_GB).Position = U2(0, 12, 0, 8)
 local raidPackList = DS.new("ScrollingFrame", raidListCard, { Size = U2(1, -12, 1, -38), Position = U2(0, 6, 0, 32), ScrollBarThickness = 3, ScrollBarImageColor3 = T.stroke, AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = U2(0, 0, 0, 0) })
 local raidPackLayout = DS.vlist(raidPackList, 4)
@@ -1242,6 +1308,13 @@ raidVisBtn.MouseButton1Click:Connect(function()
     if SaveConfig then SaveConfig() end
 end)
 
+raidAllBtn.MouseButton1Click:Connect(function()
+    raidJoinAll = not raidJoinAll
+    raidAllBtn.Text = (raidJoinAll and "[X] " or "[ ] ") .. "Join ALL raids (needed for manga tokens)"
+    raidAllBtn.BackgroundColor3 = raidJoinAll and C3(40, 200, 120) or C3(50, 50, 50)
+    if SaveConfig then SaveConfig() end
+end)
+
 local function getRaidQueue()
     local queue = {}
     for _, packName in ipairs(raidPacks) do
@@ -1307,7 +1380,7 @@ local function setRaidState(state)
         return
     end
     local queue = getRaidQueue()
-    if #queue == 0 then
+    if #queue == 0 and not raidJoinAll then
         raidRunning = false
         raidBtn.Text = "Select a raid pack"
         return
@@ -1324,6 +1397,13 @@ local function setRaidState(state)
                     packName = name
                     break
                 end
+            end
+            if not packName and raidJoinAll then
+                -- nothing left to progress: keep joining every raid that starts; vote for the first unfinished pack
+                for _, name in ipairs(raidPacks) do
+                    if raidProgress(name) < 9 then packName = name break end
+                end
+                packName = packName or raidPacks[1] or "?"
             end
             if not packName then
                 raidRunning = false
@@ -1366,6 +1446,11 @@ local function setRaidState(state)
                 end
             end
             local raidGoing = activePack ~= nil and raidLeft ~= nil and raidLeft > 0
+            if raidJoinAll and raidGoing then
+                -- join whatever raid is running, not only the queued pack
+                packName = tostring(activePack)
+                progress = raidProgress(packName)
+            end
             local finishedThisCycle = joinedKey ~= nil and cycleKey == joinedKey and joinedPack == packName and progressAtJoin ~= nil and progress > progressAtJoin
 
             if raidGoing and not finishedThisCycle then
@@ -1781,7 +1866,7 @@ local function bGrader(pFrame, sData, pcData, rName, aName, gList, gRanks)
         for _, pD in pairs(SData) do
             for iN, isS in pairs(pD.items) do if isS then table.insert(checked, iN) end end
         end
-        return {isG = isG, items = checked}
+        return {isG = isG or Resume.pending.grader == true, items = checked}
     end
     GraderAPI.LoadState = function(st)
         if not st then return end
@@ -1805,7 +1890,7 @@ local function bGrader(pFrame, sData, pcData, rName, aName, gList, gRanks)
         end
         if st.isG and #(st.items or {}) > 0 then
             sLbl.Text = "Resuming in 2s..."
-            task.delay(2, function() setGraderRunning(true) end)
+            Resume.start("grader", function() return isG end, function() if not isG then setGraderRunning(true) end end)
         end
     end
 end
@@ -2028,7 +2113,7 @@ local function bTraitRoller(pFrame, sData, pcData)
         for _, pD in pairs(SData) do
             for iN, isS in pairs(pD.items) do if isS then table.insert(checked, iN) end end
         end
-        return {isT = isT, items = checked}
+        return {isT = isT or Resume.pending.tower == true, items = checked}
     end
     TowerAPI.LoadState = function(st)
         if not st then return end
@@ -2051,7 +2136,7 @@ local function bTraitRoller(pFrame, sData, pcData)
         end
         if st.isT and #(st.items or {}) > 0 then
             sLbl.Text = "Resuming in 2s..."
-            task.delay(2, function() setRollerRunning(true) end)
+            Resume.start("tower", function() return isT end, function() if not isT then setRollerRunning(true) end end)
         end
     end
 end
@@ -2143,6 +2228,7 @@ local function bStarTrial(pFrame, sData, pcData)
     local function markStatus(card, kind)
         failed[card], done[card] = nil, nil
         if kind == "done" then done[card] = true elseif kind == "failed" then failed[card] = true end
+        FailedStore.set(card, kind == "failed")
         for pN, d in pairs(SData) do
             if d.items[card] ~= nil then
                 if kind then d.items[card] = false end
@@ -2508,6 +2594,7 @@ local function bStarTrial(pFrame, sData, pcData)
     end
     local activeAt, startedAt, sent, fights, stages, fightT, times = {}, {}, 0, 0, 0, nil, {}
     local wasActive, tries, upgrades, lastOther, verifying, evoAt = {}, {}, 0, nil, {}, {}
+    local lostTrial = {}
     local KNOWN = { StartTrial = true, StartFight = true, Attack = true, EnemyDefeated = true, StageCleared = true, Results = true, EvolutionSuccess = true }
     local ACTIVE_FOR = 8
 
@@ -2570,6 +2657,18 @@ local function bStarTrial(pFrame, sData, pcData)
     local function verifyAfterTrial(card)
         verifying[card] = true
         task.wait(1) -- let the new completion count replicate
+        if lostTrial[card] then
+            -- the card was defeated in the trial: that is a real failure (one is enough when "Mark failed after" is 1)
+            lostTrial[card] = nil
+            tries[card] = (tries[card] or 0) + 1
+            local limit = maxTries()
+            L("LOST trial " .. card .. " (failure " .. tries[card] .. (limit > 0 and ("/" .. limit) or "") .. ")")
+            if limit > 0 and tries[card] >= limit then markStatus(card, "failed") end
+            verifying[card] = nil
+            if SaveState then SaveState() end
+            pcall(refreshAll)
+            return
+        end
         local r = nextReq(card)
         if r and not r.ready then
             L("not ready " .. card .. ": " .. (r.diff and ("needs " .. r.diff .. " completions") or ("needs " .. tostring(r.short))))
@@ -2590,10 +2689,10 @@ local function bStarTrial(pFrame, sData, pcData)
     end
 
     if trialRem then
-        trialRem.OnClientEvent:Connect(function(action, a, b)
+        trialRem.OnClientEvent:Connect(function(action, a, b, c)
             local t = os.clock()
             lastEvtAt = t
-            L("IN  " .. tostring(action) .. " " .. short(a) .. " " .. short(b))
+            L("IN  " .. tostring(action) .. " " .. short(a) .. " " .. short(b) .. (c ~= nil and (" " .. short(c)) or ""))
             if action == "StartTrial" or action == "Results" then lastTrialEvt = t end
             if action == "StartTrial" then
                 trialOn, battle, chalAt = true, false, 0
@@ -2634,6 +2733,12 @@ local function bStarTrial(pFrame, sData, pcData)
                 fightT = t
                 pcall(updateNow)
             elseif action == "Attack" then
+                -- Attack(slot, yourHealthLeft, enemyHealthLeft): your card at 0 or below while the enemy still stands = the trial is lost
+                local php, ehp = tonumber(b), tonumber(c)
+                if not farm and curCard and php and ehp and php <= 0 and ehp > 0 and not lostTrial[curCard] then
+                    lostTrial[curCard] = true
+                    L("DEFEATED " .. tostring(curCard) .. " (health " .. tostring(b) .. " vs enemy " .. tostring(c) .. ")")
+                end
             elseif action == "EnemyDefeated" then
                 battle = false
                 if fightT then
@@ -3067,7 +3172,7 @@ local function bStarTrial(pFrame, sData, pcData)
     end)
 
     StarAPI.GetConfig = function()
-        return { diff = diffInp.Text, conc = concInp.Text, wait = everyInp.Text, skip = skipInp.Text, fails = giveInp.Text, noTp = noTp, hideUI = hideUI, noVis = noVis, noClose = noClose, chal = chalInp.Text, stuck = stuckInp.Text, farm = farm, farmCard = farmInp.Text }
+        return { diff = diffInp.Text, conc = concInp.Text, wait = everyInp.Text, skip = skipInp.Text, fails = giveInp.Text, noTp = noTp, hideUI = hideUI, noVis = noVis, noClose = noClose, chal = chalInp.Text, stuck = stuckInp.Text, farm = farm, farmCard = farmInp.Text, failsV = 2 }
     end
     StarAPI.LoadConfig = function(c)
         if not c then return end
@@ -3075,7 +3180,7 @@ local function bStarTrial(pFrame, sData, pcData)
         if c.conc then concInp.Text = tostring(c.conc) end
         if c.wait then everyInp.Text = tostring(c.wait) end
         if c.skip then skipInp.Text = (tostring(c.skip) == "0") and "Off" or tostring(c.skip) end
-        if c.fails then giveInp.Text = tostring(c.fails) end
+        if c.fails and c.failsV then giveInp.Text = tostring(c.fails) else giveInp.Text = "1" end
         if c.noTp ~= nil then
             noTp = c.noTp
             tpBtn.Text = (noTp and "[X] " or "[ ] ") .. "Block teleport"
@@ -3113,6 +3218,15 @@ local function bStarTrial(pFrame, sData, pcData)
         table.sort(fl) table.sort(dl)
         return { on = running, items = names, failed = fl, done = dl, v = 2 }
     end
+    -- cards remembered as failed in an earlier session
+    task.spawn(function()
+        task.wait(1)
+        for c in pairs(FailedStore.cards) do
+            local known = false
+            for _, d in pairs(SData) do if d.items[c] ~= nil then known = true break end end
+            if known and not failed[c] and not done[c] then markStatus(c, "failed") end
+        end
+    end)
     StarAPI.LoadState = function(st)
         if not st then return end
         local want = {}
@@ -3248,6 +3362,61 @@ local function bOpener(pFrame, sData)
 
     mutFilterInp = mkDropdown(rPnl, "Only this mutation (Scan / Select all)", MUT_OPTS, MUT_OPTS[1], 10)
     local opScanBtn = DS.btn(rPnl, "Scan Bag & Queue", "info", 20, 36)
+    local failQ = false
+    local failQBtn = DS.switch(rPnl, "[ ] Add failed star-trial cards' packs to queue", 21)
+    local failQNow = DS.btn(rPnl, "Queue packs with failed cards now", "info", 22, 30)
+    local failQLbl = DS.status(rPnl, "Failed-card packs: (none saved)", 23)
+    local function failPackNames()
+        local ps = FailedStore.packs()
+        return #ps > 0 and table.concat(ps, ", ") or "(none saved)"
+    end
+    -- tick every owned item (matching the Bundles-Only and mutation settings) of packs that contain a failed card
+    local function queueFailed()
+        local ps = FailedStore.packs()
+        failQLbl.Text = "Failed-card packs: " .. (#ps > 0 and table.concat(ps, ", ") or "(none saved)")
+        local packsData = getLiveData("Packs") or {}
+        local added = 0
+        for _, pN in ipairs(ps) do
+            local pD = SData[pN]
+            if pD then
+                for bName, on in pairs(pD.items) do
+                    local owned = tonumber(packsData[bName]) or 0
+                    local isBundle = string.find(bName, "%-Bundle$") ~= nil
+                    if not on and owned > 0 and (not bundlesOnly or isBundle) and passes(bName) then
+                        pD.items[bName] = true
+                        added = added + 1
+                        local b = BundleBtnMap[bName]
+                        if b then b.Text = "   ↳ [X] " .. bName .. " (" .. owned .. ")" b.TextColor3 = C3(40,200,120) end
+                    end
+                end
+                local any = false
+                for _, v in pairs(pD.items) do if v then any = true break end end
+                pD.isSelected = any
+                pD.cBtn.Text = (any and " [X] " or " [ ] ") .. pN
+                pD.cBtn.TextColor3 = any and C3(40,200,120) or C3(200,200,200)
+            end
+        end
+        if added > 0 and SaveState then SaveState() end
+        return added
+    end
+    failQBtn.MouseButton1Click:Connect(function()
+        failQ = not failQ
+        failQBtn.Text = (failQ and "[X] " or "[ ] ") .. "Add failed star-trial cards' packs to queue"
+        failQBtn.BackgroundColor3 = failQ and C3(40,200,120) or C3(50,50,50)
+        if failQ then queueFailed() end
+        if SaveConfig then SaveConfig() end
+    end)
+    failQNow.MouseButton1Click:Connect(function()
+        local n = queueFailed()
+        failQNow.Text = "Queued " .. n .. " item(s)"
+        task.delay(1.5, function() failQNow.Text = "Queue packs with failed cards now" end)
+    end)
+    task.spawn(function()
+        while pFrame:IsDescendantOf(game) do
+            failQLbl.Text = "Failed-card packs: " .. failPackNames()
+            task.wait(5)
+        end
+    end)
 
     bOnlyBtn.MouseButton1Click:Connect(function()
         bundlesOnly = not bundlesOnly
@@ -3401,15 +3570,20 @@ local function bOpener(pFrame, sData)
             return
         end
 
-        local aQ = {} 
-        for _, pD in ipairs(sData) do
-            local pN = pD.Name
-            if SData[pN] then
-                for _, bN in ipairs(getPackVariants(pN)) do
-                    if SData[pN].items[bN] then table.insert(aQ, {Pack=pN, Item=bN}) end
+        local function buildQ()
+            local q = {}
+            for _, pD in ipairs(sData) do
+                local pN = pD.Name
+                if SData[pN] then
+                    for _, bN in ipairs(getPackVariants(pN)) do
+                        if SData[pN].items[bN] then table.insert(q, {Pack=pN, Item=bN}) end
+                    end
                 end
             end
+            return q
         end
+        if failQ then queueFailed() end
+        local aQ = buildQ()
         if #aQ == 0 then isOpener = false sLbl.Text = "ERR: NO BUNDLES QUEUED" opBtn.Text, opBtn.BackgroundColor3 = "Start Auto-Opener", C3(40,200,120) if SaveState then SaveState() end return end
 
         local cIdx = 1
@@ -3418,6 +3592,13 @@ local function bOpener(pFrame, sData)
         task.spawn(function()
             while isOpener and mFrame:IsDescendantOf(game) do
                 local cT = aQ[cIdx]
+                if not cT and failQ then
+                    -- queue done: pick up packs of cards that failed in the meantime
+                    queueFailed()
+                    aQ = buildQ()
+                    cIdx = 1
+                    cT = aQ[cIdx]
+                end
                 if not cT then
                     isOpener = false
                     sLbl.Text = "Finished Queue!"
@@ -3580,7 +3761,7 @@ local function bOpener(pFrame, sData)
     end
     opBtn.MouseButton1Click:Connect(function() setOpenerRunning(not isOpener) if SaveState then SaveState() end end)
 
-    OpenerAPI.GetConfig = function() return {potion = opPotInp.Text, amt = opAmtInp.Text, spd = opSpdInp.Text, delay = opDelInp.Text, bundlesOnly = bundlesOnly, mutFilter = mutFilterInp.Text} end
+    OpenerAPI.GetConfig = function() return {potion = opPotInp.Text, amt = opAmtInp.Text, spd = opSpdInp.Text, delay = opDelInp.Text, bundlesOnly = bundlesOnly, mutFilter = mutFilterInp.Text, failQ = failQ} end
     OpenerAPI.LoadConfig = function(cfg)
         if type(cfg) ~= "table" then return end
         if cfg.potion then opPotInp.Text = tostring(cfg.potion) end
@@ -3588,6 +3769,11 @@ local function bOpener(pFrame, sData)
         if cfg.spd then opSpdInp.Text = tostring(cfg.spd) end
         if cfg.delay then opDelInp.Text = tostring(cfg.delay) end
         for _, o in ipairs(MUT_OPTS) do if cfg.mutFilter == o then mutFilterInp.Text = o end end
+        if cfg.failQ ~= nil then
+            failQ = cfg.failQ == true
+            failQBtn.Text = (failQ and "[X] " or "[ ] ") .. "Add failed star-trial cards' packs to queue"
+            failQBtn.BackgroundColor3 = failQ and C3(40,200,120) or C3(50,50,50)
+        end
         if cfg.bundlesOnly ~= nil then
             bundlesOnly = cfg.bundlesOnly == true
             bOnlyBtn.Text = bundlesOnly and "[X] Bundles Only" or "[ ] All Packs+Bundles"
@@ -3598,7 +3784,7 @@ local function bOpener(pFrame, sData)
         for _, pD in pairs(SData) do
             for bN, isS in pairs(pD.items) do if isS then table.insert(checked, bN) end end
         end
-        return {isO = isOpener, items = checked}
+        return {isO = isOpener or Resume.pending.opener == true, items = checked}
     end
     OpenerAPI.LoadState = function(st)
         if type(st) ~= "table" then return end
@@ -3622,7 +3808,7 @@ local function bOpener(pFrame, sData)
         end
         if st.isO and #(st.items or {}) > 0 then
             sLbl.Text = "Resuming in 2s..."
-            task.delay(2, function() setOpenerRunning(true) end)
+            Resume.start("opener", function() return isOpener end, function() if not isOpener then setOpenerRunning(true) end end)
         end
     end
 end
@@ -3849,7 +4035,7 @@ local function buildFigurineGrader(parent)
         for _, name in ipairs(names) do
             if selected[name] then items[#items + 1] = name end
         end
-        return { isF = running, items = items }
+        return { isF = running or Resume.pending.fig == true, items = items }
     end
     FigurineAPI.LoadState = function(st)
         if type(st) ~= "table" then return end
@@ -3864,9 +4050,11 @@ local function buildFigurineGrader(parent)
         refresh()
         if st.isF == true and count > 0 then
             status.Text = "Resuming in 2s..."
-            task.delay(2, function() setRunning(true) end)
+            Resume.start("fig", function() return running end, function() if not running then setRunning(true) end end)
         elseif running then
             setRunning(false)
+        else
+            Resume.cancel("fig")
         end
     end
 end
@@ -4210,7 +4398,7 @@ local function buildExchange(parent)
             end
         end)
     end
-    startBtn.MouseButton1Click:Connect(function() setRunning(not running) end)
+    startBtn.MouseButton1Click:Connect(function() setRunning(not running) if SaveState then SaveState() end end)
 
     task.spawn(function()
         while parent:IsDescendantOf(game) do
@@ -4230,10 +4418,198 @@ local function buildExchange(parent)
         for _, p in ipairs(c.packs or {}) do if buttons[p] then selected[p] = true end end
         refreshRows()
     end
+    ExchangeAPI.GetState = function() return { on = running or Resume.pending.exchange == true } end
+    ExchangeAPI.LoadState = function(st)
+        if type(st) ~= "table" then return end
+        if st.on == true and not running and #selectedList() > 0 then
+            status.Text = "Resuming in 2s..."
+            Resume.start("exchange", function() return running end, function() if not running then setRunning(true) end end)
+        elseif st.on == false then
+            Resume.cancel("exchange")
+            if running then setRunning(false) end
+        end
+    end
     setRunning(false)
     doScan()
 end
 buildExchange(exFrame)
+
+-- ==========================================
+-- AUTO COLLECT: grade tokens on the map + the Dragon Ball (uses the game's own pickup functions, sent from where you stand)
+-- ==========================================
+local CollectAPI = {}
+local function buildCollect(parent)
+    local CS = game:GetService("CollectionService")
+    local card = DS.card(DS.page(parent), "Auto Collect", "Picks up map items without walking to them. It calls the game's own pickup functions from where you stand.", 1)
+    local tokBtn = DS.switch(card, "[ ] Grade tokens on the map", 1)
+    local ballBtn = DS.switch(card, "[ ] Dragon Ball (spawns around the map)", 2)
+    local moveBtn = DS.switch(card, "[ ] If a pickup is refused, walk next to it", 3)
+    local stat = DS.status(card, "Status: Off", 4)
+    local on = { tok = false, ball = false, move = false }
+    local st = { tokens = 0, refused = 0, balls = 0, ballRefused = 0, last = "-" }
+    local mods = {}
+    local function handler(name)
+        if mods[name] == nil then
+            local ok, m = pcall(function() return require(RS.Client.UI[name]) end)
+            mods[name] = (ok and type(m) == "table") and m or false
+        end
+        return mods[name] or nil
+    end
+    local function hrp() local c = LP.Character return c and (c:FindFirstChild("HumanoidRootPart") or c.PrimaryPart) end
+    -- walk next to a position, run fn, walk back
+    local function visit(cf, fn)
+        local r = hrp()
+        if not r then return end
+        local back = r.CFrame
+        r.CFrame = cf * CFrame.new(0, 2, 0)
+        task.wait(1.2)
+        pcall(fn)
+        task.wait(1)
+        local r2 = hrp()
+        if r2 then r2.CFrame = back end
+    end
+    local function paint(btn, label, v)
+        btn.Text = (v and "[X] " or "[ ] ") .. label
+        btn.BackgroundColor3 = v and C3(40, 200, 120) or C3(50, 50, 50)
+    end
+    local L_TOK, L_BALL, L_MOVE = "Grade tokens on the map", "Dragon Ball (spawns around the map)", "If a pickup is refused, walk next to it"
+    local function flip(key, btn, label)
+        on[key] = not on[key]
+        paint(btn, label, on[key])
+        if SaveConfig then SaveConfig() end
+    end
+    tokBtn.MouseButton1Click:Connect(function() flip("tok", tokBtn, L_TOK) end)
+    ballBtn.MouseButton1Click:Connect(function() flip("ball", ballBtn, L_BALL) end)
+    moveBtn.MouseButton1Click:Connect(function() flip("move", moveBtn, L_MOVE) end)
+
+    local function refresh()
+        local parts = {}
+        parts[#parts + 1] = string.format("Tokens: %d collected, %d refused", st.tokens, st.refused)
+        parts[#parts + 1] = string.format("Dragon Balls: %d collected, %d refused", st.balls, st.ballRefused)
+        parts[#parts + 1] = "Last: " .. st.last
+        stat.Text = "Status: " .. ((on.tok or on.ball) and "Watching" or "Off") .. "\n" .. table.concat(parts, "\n")
+    end
+
+    -- ===== grade tokens: parts tagged "<YourName>Token"; the game's CollectToken(part) sends CollectToken + part.Name =====
+    local tries = setmetatable({}, { __mode = "k" })
+    local function fireToken(part)
+        part:SetAttribute("Collected", nil)
+        local GH = handler("GradeHandler")
+        if GH and type(GH.CollectToken) == "function" then
+            if pcall(GH.CollectToken, part) then return end
+        end
+        local r = getRemote("Card")
+        if r then pcall(function() r:FireServer("CollectToken", part.Name) end) end
+    end
+    task.spawn(function()
+        while true do
+            task.wait(1)
+            if on.tok then
+                pcall(function()
+                    local list = CS:GetTagged(LP.Name .. "Token")
+                    local before = tonumber(getLiveData("GradeTokens")) or 0
+                    local sent, sentParts = 0, {}
+                    for _, part in ipairs(list) do
+                        if not on.tok then break end
+                        local t = tries[part]
+                        if t and t.n >= 3 and os.clock() - t.at > 60 then t = nil end
+                        if part.Parent and part:GetAttribute("Collected") ~= true and (not t or t.n < 3) then
+                            tries[part] = { n = (t and t.n or 0) + 1, at = os.clock() }
+                            fireToken(part)
+                            sent = sent + 1
+                            sentParts[#sentParts + 1] = part
+                            task.wait(0.15)
+                        end
+                    end
+                    if sent > 0 then
+                        task.wait(2)
+                        local gain = (tonumber(getLiveData("GradeTokens")) or 0) - before
+                        if gain > 0 then
+                            st.tokens = st.tokens + gain
+                            st.last = os.date("%H:%M:%S") .. " grade token +" .. gain
+                        else
+                            st.refused = st.refused + sent
+                            st.last = os.date("%H:%M:%S") .. " token pickup gave nothing"
+                            if on.move then
+                                for i = 1, math.min(#sentParts, 3) do
+                                    local part = sentParts[i]
+                                    if part.Parent then visit(part.CFrame, function() fireToken(part) end) end
+                                end
+                                local g2 = (tonumber(getLiveData("GradeTokens")) or 0) - before
+                                if g2 > 0 then st.tokens = st.tokens + g2 st.last = os.date("%H:%M:%S") .. " grade token +" .. g2 .. " (walked)" end
+                            end
+                        end
+                    end
+                end)
+            end
+            pcall(refresh)
+        end
+    end)
+
+    -- ===== dragon ball: the game shows your ball as workspace.VFX["<name>-DB"]; the real part sits at the same spot =====
+    local handled = setmetatable({}, { __mode = "k" })
+    local function collectBall(model)
+        local pivot = model:GetPivot().Position
+        local found
+        for _, d in ipairs(workspace:GetDescendants()) do
+            if d:IsA("BasePart") and not d:IsDescendantOf(workspace.VFX) and not (LP.Character and d:IsDescendantOf(LP.Character)) and (d.Position - pivot).Magnitude < 1 then
+                if #CS:GetTags(d) > 0 then found = d break end
+            end
+        end
+        local function fire()
+            if found then found:SetAttribute("Collected", nil) end
+            local DH = handler("DragonBallHandler")
+            if found and DH and type(DH.CollectDB) == "function" and pcall(DH.CollectDB, found) then return end
+            local r = getRemote("DragonBall")
+            if r then pcall(function() r:FireServer("Collect") end) end
+        end
+        local function gone() return model.Parent == nil end
+        for attempt = 1, 3 do
+            fire()
+            for _ = 1, 8 do task.wait(0.5) if gone() then break end end
+            if gone() then break end
+        end
+        if not gone() and on.move then
+            visit(found and found.CFrame or CFrame.new(pivot), fire)
+            for _ = 1, 6 do task.wait(0.5) if gone() then break end end
+        end
+        if gone() then
+            st.balls = st.balls + 1
+            st.last = os.date("%H:%M:%S") .. " Dragon Ball collected"
+        else
+            st.ballRefused = st.ballRefused + 1
+            st.last = os.date("%H:%M:%S") .. " Dragon Ball pickup refused"
+        end
+    end
+    task.spawn(function()
+        while true do
+            task.wait(1.5)
+            if on.ball then
+                pcall(function()
+                    local vfx = workspace:FindFirstChild("VFX")
+                    if not vfx then return end
+                    for _, c in ipairs(vfx:GetChildren()) do
+                        if (c.Name == LP.Name .. "-DB" or c.Name == tostring(LP.UserId) .. "-DB") and not handled[c] then
+                            handled[c] = true
+                            task.wait(0.5)
+                            collectBall(c)
+                        end
+                    end
+                end)
+            end
+        end
+    end)
+
+    CollectAPI.GetConfig = function() return { tokens = on.tok, ball = on.ball, move = on.move } end
+    CollectAPI.LoadConfig = function(c)
+        if type(c) ~= "table" then return end
+        on.tok, on.ball, on.move = c.tokens == true, c.ball == true, c.move == true
+        paint(tokBtn, L_TOK, on.tok) paint(ballBtn, L_BALL, on.ball) paint(moveBtn, L_MOVE, on.move)
+    end
+    CollectAPI.Stats = st
+    refresh()
+end
+buildCollect(colFrame)
 
 -- ==========================================
 -- 10. SETTINGS TAB & AUTO-SYNC ENGINE
@@ -4321,7 +4697,7 @@ function Persist.getRaid()
     for _, name in ipairs(raidPacks) do
         if raidSelectedPacks[name] then packs[#packs + 1] = name end
     end
-    return { running = raidRunning, packs = packs }
+    return { running = raidRunning or Resume.pending.raid == true, packs = packs }
 end
 
 function Persist.loadRaid(st)
@@ -4331,14 +4707,16 @@ function Persist.loadRaid(st)
         if raidPackButtons[name] then raidSelectedPacks[name] = true end
     end
     refreshRaidPackRows()
-    if st.running and next(raidSelectedPacks) ~= nil and not raidRunning then
-        setRaidState(true)
+    if st.running and (next(raidSelectedPacks) ~= nil or raidJoinAll) and not raidRunning then
+        Resume.start("raid", function() return raidRunning end, function() if not raidRunning then setRaidState(true) end end)
+    elseif not st.running then
+        Resume.cancel("raid")
     end
 end
 
 function Persist.buildConfig()
     return {
-        userId = LP.UserId, accountName = LP.Name, uiScale = scInp.Text, afk = isAFK, fishDelay = fDelInp.Text, raidNoVis = raidNoVis,
+        userId = LP.UserId, accountName = LP.Name, uiScale = scInp.Text, afk = isAFK, fishDelay = fDelInp.Text, raidNoVis = raidNoVis, raidJoinAll = raidJoinAll,
         grader = Persist.safe(GraderAPI.GetConfig),
         tower = Persist.safe(TowerAPI.GetConfig),
         auto = Persist.safe(AutoAPI.GetConfig),
@@ -4346,6 +4724,7 @@ function Persist.buildConfig()
         opener = Persist.safe(OpenerAPI.GetConfig),
         fig = Persist.safe(FigurineAPI.GetConfig),
         exchange = Persist.safe(ExchangeAPI.GetConfig),
+        collect = Persist.safe(CollectAPI.GetConfig),
     }
 end
 
@@ -4361,6 +4740,7 @@ function Persist.buildState()
         star = Persist.safe(StarAPI.GetState),
         opener = Persist.safe(OpenerAPI.GetState),
         fig = Persist.safe(FigurineAPI.GetState),
+        exchange = Persist.safe(ExchangeAPI.GetState),
     }
 end
 
@@ -4396,10 +4776,12 @@ function Persist.startAutosave()
 end
 
 rstBtn.MouseButton1Click:Connect(function()
+    for _, l in ipairs({ "grader", "tower", "opener", "fig", "exchange", "raid" }) do Resume.cancel(l) end
     Persist.safe(GraderAPI.LoadState, {isG = false, items = {}})
     Persist.safe(TowerAPI.LoadState, {isT = false, items = {}})
     Persist.safe(OpenerAPI.LoadState, {isO = false, items = {}})
     Persist.safe(FigurineAPI.LoadState, {isF = false, items = {}})
+    Persist.safe(ExchangeAPI.LoadState, {on = false})
     Persist.safe(setMarketBuyState, false)
     Persist.safe(setRaidState, false)
     Persist.safe(Persist.loadRaid, {running = false, packs = {}})
@@ -4425,6 +4807,11 @@ local function InitAccountFiles()
             if cfg.uiScale then scInp.Text = tostring(cfg.uiScale) applyScale(scInp.Text) end
             if cfg.afk ~= nil then setAfkState(cfg.afk) end
             if cfg.fishDelay then fDelInp.Text = tostring(cfg.fishDelay) end
+            if cfg.raidJoinAll ~= nil then
+                raidJoinAll = cfg.raidJoinAll and true or false
+                raidAllBtn.Text = (raidJoinAll and "[X] " or "[ ] ") .. "Join ALL raids (needed for manga tokens)"
+                raidAllBtn.BackgroundColor3 = raidJoinAll and C3(40, 200, 120) or C3(50, 50, 50)
+            end
             if cfg.raidNoVis ~= nil then
                 raidNoVis = cfg.raidNoVis and true or false
                 raidVisBtn.Text = (raidNoVis and "[X] " or "[ ] ") .. "No raid teleport / visuals"
@@ -4438,6 +4825,7 @@ local function InitAccountFiles()
         try("opener config", function() if cfg.opener then OpenerAPI.LoadConfig(cfg.opener) end end)
         try("figurine config", function() if cfg.fig then FigurineAPI.LoadConfig(cfg.fig) end end)
         try("exchange config", function() if cfg.exchange then ExchangeAPI.LoadConfig(cfg.exchange) end end)
+        try("collect config", function() if cfg.collect then CollectAPI.LoadConfig(cfg.collect) end end)
     end
 
     Persist.loadingCfg = false
@@ -4458,6 +4846,7 @@ local function InitAccountFiles()
             try("opener", function() if st.opener then OpenerAPI.LoadState(st.opener) end end)
             try("figurines", function() if st.fig then FigurineAPI.LoadState(st.fig) end end)
             try("star trial", function() if st.star then StarAPI.LoadState(st.star) end end)
+            try("exchange", function() if st.exchange then ExchangeAPI.LoadState(st.exchange) end end)
             try("raid", function() if st.raid then Persist.loadRaid(st.raid) end end)
             task.wait(6)
         else
